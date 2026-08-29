@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import math
 import re
+from datetime import date, datetime
 from io import BytesIO
-from typing import Iterable
+from typing import Iterable, Iterator
 
 import numpy as np
 import openpyxl
 import pandas as pd
+import xlrd
 
 from .nbs import normalize_state
 
@@ -20,15 +22,30 @@ _MONTH_NUM = {
     "may": 5, "june": 6, "july": 7, "august": 8,
     "september": 9, "october": 10, "november": 11, "december": 12,
 }
+_OLE2 = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 
 
 def _month(value: object) -> pd.Timestamp | None:
-    if value is None:
+    if value is None or isinstance(value, bool):
         return None
-    m = _MONTH_RE.search(str(value))
-    if not m:
+    if isinstance(value, (pd.Timestamp, datetime, date)):
+        ts = pd.Timestamp(value)
+        return pd.Timestamp(year=ts.year, month=ts.month, day=1)
+    if isinstance(value, (int, float, np.number)):
         return None
-    return pd.Timestamp(year=int(m.group(2)), month=_MONTH_NUM[m.group(1).casefold()], day=1)
+    text = str(value).strip()
+    m = _MONTH_RE.search(text)
+    if m:
+        return pd.Timestamp(year=int(m.group(2)), month=_MONTH_NUM[m.group(1).casefold()], day=1)
+    # NBS legacy workbooks frequently store month headers as Excel dates, which
+    # openpyxl exposes as datetime objects but schema probes may stringify.
+    try:
+        ts = pd.to_datetime(text, errors="raise")
+    except (ValueError, TypeError, OverflowError):
+        return None
+    if pd.isna(ts) or not (2000 <= int(ts.year) <= 2100):
+        return None
+    return pd.Timestamp(year=int(ts.year), month=int(ts.month), day=1)
 
 
 def _num(value: object) -> float | None:
@@ -45,13 +62,40 @@ def _num(value: object) -> float | None:
     return x if math.isfinite(x) else None
 
 
-def _sheet_rows(ws, *, max_rows: int = 140, max_cols: int = 60) -> list[list[object]]:
-    rows: list[list[object]] = []
-    for i, row in enumerate(ws.iter_rows(values_only=True)):
-        rows.append(list(row[:max_cols]))
-        if i + 1 >= max_rows:
-            break
-    return rows
+def _sheet_rows_openxml(payload: bytes, *, max_rows: int, max_cols: int) -> Iterator[tuple[str, list[list[object]]]]:
+    wb = openpyxl.load_workbook(BytesIO(payload), read_only=True, data_only=True)
+    for ws in wb.worksheets:
+        rows: list[list[object]] = []
+        for i, row in enumerate(ws.iter_rows(values_only=True)):
+            rows.append(list(row[:max_cols]))
+            if i + 1 >= max_rows:
+                break
+        yield ws.title, rows
+
+
+def _sheet_rows_xls(payload: bytes, *, max_rows: int, max_cols: int) -> Iterator[tuple[str, list[list[object]]]]:
+    wb = xlrd.open_workbook(file_contents=payload, on_demand=True)
+    for ws in wb.sheets():
+        rows: list[list[object]] = []
+        for ridx in range(min(ws.nrows, max_rows)):
+            row: list[object] = []
+            for cidx in range(min(ws.ncols, max_cols)):
+                cell = ws.cell(ridx, cidx)
+                value: object = cell.value
+                if cell.ctype == xlrd.XL_CELL_DATE:
+                    try:
+                        value = xlrd.xldate.xldate_as_datetime(cell.value, wb.datemode)
+                    except (ValueError, OverflowError):
+                        pass
+                row.append(value)
+            rows.append(row)
+        yield ws.name, rows
+
+
+def _workbook_sheets(payload: bytes, *, max_rows: int = 220, max_cols: int = 80) -> list[tuple[str, list[list[object]]]]:
+    if payload.startswith(_OLE2):
+        return list(_sheet_rows_xls(payload, max_rows=max_rows, max_cols=max_cols))
+    return list(_sheet_rows_openxml(payload, max_rows=max_rows, max_cols=max_cols))
 
 
 def parse_state_food_cpi_workbook(
@@ -59,24 +103,23 @@ def parse_state_food_cpi_workbook(
     *,
     source_url: str,
     workbook_name: str,
-    index_regime: str = "2009-base",
+    index_regime: str,
 ) -> pd.DataFrame:
-    """Parse the all-state Food CPI table from an official NBS workbook.
+    """Parse all-state Food CPI values from an official NBS workbook.
 
-    Legacy NBS CPI workbooks use a ``State CPI`` sheet with rolling month blocks.
-    Each month block contains FOOD and ALL ITEMS values. The parser reconstructs
-    merged month headers by forward filling and uses only raw index columns—not
-    annual/monthly change columns.
+    The parser does not depend on a fixed worksheet name. It identifies the
+    worksheet/column containing at least 30 canonical Nigerian states, recovers
+    rolling month headers (including real Excel dates), and selects raw FOOD
+    index columns while rejecting annual/monthly percentage-change columns.
+    Both OpenXML and legacy binary XLS workbooks are supported.
     """
-    wb = openpyxl.load_workbook(BytesIO(payload), read_only=True, data_only=True)
     candidates = sorted(
-        wb.worksheets,
-        key=lambda ws: ("state cpi" not in ws.title.casefold(), ws.title.casefold()),
+        _workbook_sheets(payload),
+        key=lambda item: ("state cpi" not in item[0].casefold(), item[0].casefold()),
     )
     records: list[dict[str, object]] = []
 
-    for ws in candidates:
-        rows = _sheet_rows(ws)
+    for sheet_name, rows in candidates:
         if not rows:
             continue
         width = max((len(r) for r in rows), default=0)
@@ -95,14 +138,16 @@ def parse_state_food_cpi_workbook(
             continue
 
         first_state = min(r for r, _ in best_state_rows)
-        header_rows = rows[max(0, first_state - 7):first_state]
+        header_rows = rows[max(0, first_state - 10):first_state]
         months_by_col: dict[int, pd.Timestamp] = {}
         last_month: pd.Timestamp | None = None
         for col in range(width):
-            direct = None
+            direct: pd.Timestamp | None = None
             for header in header_rows:
                 if col < len(header):
-                    direct = _month(header[col]) or direct
+                    parsed = _month(header[col])
+                    if parsed is not None:
+                        direct = parsed
             if direct is not None:
                 last_month = direct
             if last_month is not None:
@@ -110,11 +155,15 @@ def parse_state_food_cpi_workbook(
 
         for col, month in months_by_col.items():
             header_stack = " ".join(
-                str(header[col]) for header in header_rows if col < len(header) and header[col] not in (None, "")
+                str(header[col]) for header in header_rows
+                if col < len(header) and header[col] not in (None, "")
             ).casefold()
             if "food" not in header_stack:
                 continue
-            if any(term in header_stack for term in ("annual change", "monthly change", "% change", "year on year", "month on month")):
+            if any(term in header_stack for term in (
+                "annual change", "monthly change", "% change", "percent change",
+                "year on year", "month on month", "y-o-y", "m-o-m",
+            )):
                 continue
             values: list[tuple[str, float]] = []
             for ridx, state in best_state_rows:
@@ -130,18 +179,19 @@ def parse_state_food_cpi_workbook(
                     "month": month,
                     "food_cpi": food_index,
                     "index_regime": index_regime,
-                    "source_sheet": ws.title,
+                    "source_sheet": sheet_name,
                     "source_workbook": workbook_name,
                     "source_url": source_url,
                 })
         if records:
             break
 
+    columns = [
+        "state", "month", "food_cpi", "index_regime", "source_sheet",
+        "source_workbook", "source_url",
+    ]
     if not records:
-        return pd.DataFrame(columns=[
-            "state", "month", "food_cpi", "index_regime", "source_sheet",
-            "source_workbook", "source_url",
-        ])
+        return pd.DataFrame(columns=columns)
     out = pd.DataFrame(records)
     return (
         out.groupby(["state", "month", "index_regime"], as_index=False)
@@ -161,8 +211,6 @@ def consolidate_cpi(frames: Iterable[pd.DataFrame]) -> pd.DataFrame:
     if not parts:
         return pd.DataFrame()
     all_rows = pd.concat(parts, ignore_index=True)
-    # Rolling NBS workbooks repeat prior months. Median should equal the published
-    # value; source_count makes disagreements visible instead of silently hiding them.
     grouped = (
         all_rows.groupby(["state", "month", "index_regime"], as_index=False)
         .agg(
@@ -175,10 +223,10 @@ def consolidate_cpi(frames: Iterable[pd.DataFrame]) -> pd.DataFrame:
         )
     )
     grouped["source_disagreement"] = (grouped["source_max"] - grouped["source_min"]).abs()
-    return grouped.sort_values(["month", "state"]).reset_index(drop=True)
+    return grouped.sort_values(["month", "state", "index_regime"]).reset_index(drop=True)
 
 
-def add_cpi_targets(frame: pd.DataFrame, *, lags: tuple[int, ...] = (1, 2, 3, 6)) -> pd.DataFrame:
+def add_cpi_targets(frame: pd.DataFrame, *, lags: tuple[int, ...] = (1, 2, 3, 6, 12)) -> pd.DataFrame:
     if frame.empty:
         return frame.copy()
     keys = ["state", "index_regime"]
