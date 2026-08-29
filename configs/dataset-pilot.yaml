@@ -9,15 +9,8 @@ end_date: '2025-11-01'
 
 dataset:
   states: []
-  commodities:
-    - Maize
-    - Millet
-    - Sorghum
-    - Rice (imported)
-    - Rice (local)
-    - Beans (niebe)
-  units:
-    - KG
+  commodities: []
+  units: []
   pricetypes: []
   price_lags_months:
     - 1
