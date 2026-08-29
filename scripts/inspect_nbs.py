@@ -9,16 +9,18 @@ from pathlib import Path
 import openpyxl
 import requests
 
-# Direct e-library resources are materially more reliable from GitHub-hosted
-# runners than the NADA/microdata download gateway. These URLs are discovered
-# from each NBS report page's "Download Tables" link.
+# Direct e-library table resources discovered from official NBS report pages.
 RESOURCES = {
     "food_dec_2023": "https://nigerianstat.gov.ng/resource/selected_food_Dec_2023.xlsx",
     "food_jan_2024": "https://nigerianstat.gov.ng/resource/SELECTED_FOOD_JANUARY_2024.xlsx",
     "food_mar_2024": "https://nigerianstat.gov.ng/resource/selected_food_march_2024.xlsx",
     "food_oct_2024": "https://nigerianstat.gov.ng/resource/selected_food_oct_2024.xlsx",
+    "cpi_jan_2024": "https://nigerianstat.gov.ng/resource/cpi_1NewJANUARY2024.xlsx",
     "cpi_jul_2024": "https://nigerianstat.gov.ng/resource/cpi_1NewJuly_2024.xlsx",
     "cpi_aug_2024": "https://nigerianstat.gov.ng/resource/cpi_1NewAug_2024.xlsx",
+    "cpi_oct_2024": "https://nigerianstat.gov.ng/resource/cpi_OCT2024.xlsx",
+    "cohd_jan_2024": "https://nigerianstat.gov.ng/resource/COHD_January_2024_Table.xlsx",
+    "cohd_sep_2024": "https://nigerianstat.gov.ng/resource/cohd_sept2024.xlsx",
 }
 
 
@@ -40,10 +42,10 @@ def inspect_book(name: str, payload: bytes) -> dict:
     for ws in wb.worksheets:
         rows = []
         for idx, row in enumerate(ws.iter_rows(values_only=True), start=1):
-            vals = [None if v is None else str(v) for v in row[:28]]
+            vals = [None if v is None else str(v) for v in row[:32]]
             if any(v not in (None, "") for v in vals):
                 rows.append({"row": idx, "values": vals})
-            if len(rows) >= 30:
+            if len(rows) >= 36:
                 break
         result["sheets"].append({
             "title": ws.title,
