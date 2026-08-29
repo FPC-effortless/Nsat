@@ -135,6 +135,68 @@ def add_calendar_targets(labels: pd.DataFrame, lags: tuple[int, ...] = (1, 3, 12
     return out
 
 
+def _market_month_counts(
+    labels: pd.DataFrame,
+    *,
+    start_date: str,
+    end_date: str,
+    require_next_target: bool,
+) -> pd.DataFrame:
+    start = pd.Timestamp(start_date)
+    end = pd.Timestamp(end_date)
+    work = labels[(labels["month"] >= start) & (labels["month"] < end)].copy()
+    if require_next_target and "target_price_ngn_1m" in work.columns:
+        work = work[work["target_price_ngn_1m"].notna()]
+    return (
+        work.groupby(["admin1", "admin2", "market", "market_id", "latitude", "longitude", "month"], as_index=False)
+        .size()
+        .rename(columns={"size": "label_rows"})
+        .sort_values(["month", "label_rows", "market_id"], ascending=[False, False, True])
+        .reset_index(drop=True)
+    )
+
+
+def _spread_months(counts: pd.DataFrame, limit: int) -> pd.DataFrame:
+    if counts.empty or limit <= 0:
+        return counts.head(0).copy()
+    months = sorted(pd.to_datetime(counts["month"].unique()))
+    if len(months) <= limit:
+        chosen_months = months
+    else:
+        indices = np.linspace(0, len(months) - 1, num=limit)
+        chosen_months = [months[int(round(i))] for i in indices]
+        chosen_months = list(dict.fromkeys(chosen_months))
+
+    chosen_rows: list[pd.DataFrame] = []
+    chosen_keys: set[tuple[int, pd.Timestamp]] = set()
+    for month in chosen_months:
+        group = counts[counts["month"].eq(month)].sort_values(
+            ["label_rows", "market_id"], ascending=[False, True]
+        )
+        if not group.empty:
+            row = group.head(1)
+            chosen_rows.append(row)
+            chosen_keys.add((int(row.iloc[0]["market_id"]), pd.Timestamp(month)))
+
+    chosen = pd.concat(chosen_rows, ignore_index=True) if chosen_rows else counts.head(0).copy()
+    if len(chosen) < limit:
+        remaining = counts[
+            ~counts.apply(lambda r: (int(r["market_id"]), pd.Timestamp(r["month"])) in chosen_keys, axis=1)
+        ].copy()
+        # Fill remaining quota by cycling chronologically through months, taking the
+        # highest-coverage unused market within each month before taking a second one.
+        remaining["rank_in_month"] = remaining.groupby("month")["label_rows"].rank(
+            method="first", ascending=False
+        )
+        remaining = remaining.sort_values(
+            ["rank_in_month", "month", "label_rows", "market_id"],
+            ascending=[True, True, False, True],
+        )
+        chosen = pd.concat([chosen, remaining.head(limit - len(chosen))], ignore_index=True)
+
+    return chosen.sort_values(["month", "label_rows", "market_id"], ascending=[True, False, True]).head(limit).reset_index(drop=True)
+
+
 def select_market_months(
     labels: pd.DataFrame,
     *,
@@ -142,18 +204,16 @@ def select_market_months(
     end_date: str,
     limit: int | None = None,
     require_next_target: bool = True,
+    spread_across_months: bool = False,
 ) -> pd.DataFrame:
-    start = pd.Timestamp(start_date)
-    end = pd.Timestamp(end_date)
-    work = labels[(labels["month"] >= start) & (labels["month"] < end)].copy()
-    if require_next_target and "target_price_ngn_1m" in work.columns:
-        work = work[work["target_price_ngn_1m"].notna()]
-    counts = (
-        work.groupby(["admin1", "admin2", "market", "market_id", "latitude", "longitude", "month"], as_index=False)
-        .size()
-        .rename(columns={"size": "label_rows"})
-        .sort_values(["month", "label_rows", "market_id"], ascending=[False, False, True])
+    counts = _market_month_counts(
+        labels,
+        start_date=start_date,
+        end_date=end_date,
+        require_next_target=require_next_target,
     )
     if limit is not None and limit > 0:
+        if spread_across_months:
+            return _spread_months(counts, limit)
         counts = counts.head(limit)
     return counts.reset_index(drop=True)

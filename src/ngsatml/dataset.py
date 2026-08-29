@@ -41,6 +41,67 @@ def _assign_split(month: pd.Series, split_cfg: dict[str, Any]) -> pd.Series:
     return month.map(one)
 
 
+def _month_after(value: str | pd.Timestamp) -> pd.Timestamp:
+    ts = pd.Timestamp(value)
+    return (ts.to_period("M") + 1).to_timestamp()
+
+
+def _select_market_months_for_build(
+    labels: pd.DataFrame,
+    cfg: dict[str, Any],
+    dcfg: dict[str, Any],
+    limit: int | None,
+) -> pd.DataFrame:
+    require_target = bool(dcfg.get("require_next_target", True))
+    balanced = bool(dcfg.get("balanced_temporal_sampling", False))
+    split_cfg = cfg.get("split", {})
+    if not balanced or not limit or not split_cfg.get("train_end") or not split_cfg.get("validation_end"):
+        return select_market_months(
+            labels,
+            start_date=cfg["start_date"],
+            end_date=cfg["end_date"],
+            limit=int(limit) if limit else None,
+            require_next_target=require_target,
+            spread_across_months=bool(dcfg.get("spread_across_months", False)),
+        )
+
+    train_start = pd.Timestamp(cfg["start_date"])
+    validation_start = _month_after(split_cfg["train_end"])
+    test_start = _month_after(split_cfg["validation_end"])
+    end = pd.Timestamp(cfg["end_date"])
+    ranges = [
+        ("train", train_start, validation_start),
+        ("validation", validation_start, test_start),
+        ("test", test_start, end),
+    ]
+
+    base = int(limit) // len(ranges)
+    remainder = int(limit) % len(ranges)
+    parts: list[pd.DataFrame] = []
+    for idx, (name, start, stop) in enumerate(ranges):
+        quota = base + (1 if idx < remainder else 0)
+        if quota <= 0 or start >= stop:
+            continue
+        part = select_market_months(
+            labels,
+            start_date=start.isoformat(),
+            end_date=stop.isoformat(),
+            limit=quota,
+            require_next_target=require_target,
+            spread_across_months=True,
+        )
+        if part.empty:
+            raise RuntimeError(f"Balanced sampling produced no {name} market-months for {start.date()}..{stop.date()}")
+        part = part.copy()
+        part["selection_split"] = name
+        parts.append(part)
+
+    if not parts:
+        return pd.DataFrame()
+    selected = pd.concat(parts, ignore_index=True)
+    return selected.sort_values(["month", "label_rows", "market_id"], ascending=[True, False, True]).reset_index(drop=True)
+
+
 def build_market_satellite_dataset(
     cfg: dict[str, Any],
     output_dir: str | Path,
@@ -66,13 +127,7 @@ def build_market_satellite_dataset(
 
     configured_limit = dcfg.get("market_month_limit")
     limit = market_month_limit if market_month_limit is not None else configured_limit
-    selected = select_market_months(
-        labels,
-        start_date=cfg["start_date"],
-        end_date=cfg["end_date"],
-        limit=int(limit) if limit else None,
-        require_next_target=bool(dcfg.get("require_next_target", True)),
-    )
+    selected = _select_market_months_for_build(labels, cfg, dcfg, int(limit) if limit else None)
     if selected.empty:
         start = pd.Timestamp(cfg["start_date"])
         end = pd.Timestamp(cfg["end_date"])
@@ -104,6 +159,8 @@ def build_market_satellite_dataset(
             "month": pd.Timestamp(row.month),
             "market_month_label_rows": int(row.label_rows),
         }
+        if hasattr(row, "selection_split"):
+            base["selection_split"] = row.selection_split
         features = extract_market_month_s2(
             float(row.longitude),
             float(row.latitude),
@@ -117,7 +174,8 @@ def build_market_satellite_dataset(
         base.update(features)
         feature_rows.append(base)
         print(
-            f"{row.admin1} | {row.market} | {pd.Timestamp(row.month).strftime('%Y-%m')} | "
+            f"{getattr(row, 'selection_split', 'sample')} | {row.admin1} | {row.market} | "
+            f"{pd.Timestamp(row.month).strftime('%Y-%m')} | "
             f"S2={features.get('s2_status')} candidates={features.get('s2_candidate_scenes', 0)}"
         )
 
@@ -125,7 +183,7 @@ def build_market_satellite_dataset(
     selected_keys = selected[["market_id", "month"]].drop_duplicates()
     scoped_labels = labels.merge(selected_keys, on=["market_id", "month"], how="inner")
     dataset = scoped_labels.merge(
-        satellite.drop(columns=["admin1", "admin2", "market", "latitude", "longitude"], errors="ignore"),
+        satellite.drop(columns=["admin1", "admin2", "market", "latitude", "longitude", "selection_split"], errors="ignore"),
         on=["market_id", "month"],
         how="left",
     )
@@ -152,15 +210,24 @@ def build_market_satellite_dataset(
     usable.to_csv(usable_csv, index=False)
     usable.to_parquet(usable_parquet, index=False)
 
+    split_rows = {str(k): int(v) for k, v in usable["split"].value_counts().to_dict().items()}
+    split_market_months = (
+        usable[["split", "market_id", "month"]].drop_duplicates()["split"].value_counts().to_dict()
+        if not usable.empty else {}
+    )
     summary = {
-        "version": "0.2.0",
+        "version": "0.2.1",
         "wfp_source": WFP_CSV_URL,
         "sentinel_stac": "https://earth-search.aws.element84.com/v1",
         "start_date": cfg["start_date"],
         "end_date": cfg["end_date"],
+        "balanced_temporal_sampling": bool(dcfg.get("balanced_temporal_sampling", False)),
         "selected_market_months": int(len(selected)),
         "label_rows": int(len(dataset)),
         "usable_rows": int(len(usable)),
+        "split_rows": split_rows,
+        "split_market_months": {str(k): int(v) for k, v in split_market_months.items()},
+        "months": sorted(usable["month"].dropna().astype(str).unique().tolist()),
         "s2_market_months_ok": int(satellite["s2_status"].eq("ok").sum()),
         "s2_market_months_total": int(len(satellite)),
         "states": sorted(dataset["admin1"].dropna().astype(str).unique().tolist()),

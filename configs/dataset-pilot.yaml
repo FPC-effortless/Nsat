@@ -17,6 +17,7 @@ dataset:
     - 3
     - 12
   require_next_target: true
+  balanced_temporal_sampling: true
   market_month_limit: 120
   patch_radius_m: 1280
   patch_pixels: 64

@@ -40,6 +40,37 @@ def test_select_market_month_requires_real_next_month_target():
     assert selected["month"].tolist() == [pd.Timestamp("2025-01-01")]
 
 
+def test_temporal_spread_sampling_uses_distinct_months():
+    rows = []
+    for month in range(1, 7):
+        rows.append(
+            [
+                f"2024-{month:02d}-15", "Katsina", "Jibia", "Jibia", 1038, 13.08, 7.24,
+                "Maize", "KG", "Wholesale", "NGN", 100.0 + month, 0.1,
+            ]
+        )
+    raw = pd.DataFrame(
+        rows,
+        columns=[
+            "date", "admin1", "admin2", "market", "market_id", "latitude", "longitude",
+            "commodity", "unit", "pricetype", "currency", "price", "usdprice",
+        ],
+    )
+    labels = add_calendar_targets(normalize_prices(raw), (1,))
+    selected = select_market_months(
+        labels,
+        start_date="2024-01-01",
+        end_date="2024-06-01",
+        limit=3,
+        require_next_target=True,
+        spread_across_months=True,
+    )
+    assert len(selected) == 3
+    assert selected["month"].nunique() == 3
+    assert selected["month"].min() == pd.Timestamp("2024-01-01")
+    assert selected["month"].max() == pd.Timestamp("2024-05-01")
+
+
 def test_satellite_query_helpers_are_month_and_location_bounded():
     assert month_bounds("2025-01-15") == ("2025-01-01", "2025-02-01")
     west, south, east, north = point_bbox(7.24, 13.08, 1000)
