@@ -1,6 +1,8 @@
 name: Build source catalog
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       mode:
@@ -33,7 +35,10 @@ jobs:
         id: config
         shell: bash
         run: |
-          if [ "${{ inputs.mode }}" = "pilot" ]; then
+          MODE="${{ github.event.inputs.mode }}"
+          if [ -z "$MODE" ]; then MODE="smoke"; fi
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          if [ "$MODE" = "pilot" ]; then
             echo "path=configs/pilot.yaml" >> "$GITHUB_OUTPUT"
           else
             echo "path=configs/smoke.yaml" >> "$GITHUB_OUTPUT"
@@ -52,7 +57,7 @@ jobs:
         shell: bash
         run: |
           echo "## Nsat source catalog" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Mode: ${{ inputs.mode }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Mode: ${{ steps.config.outputs.mode }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- Config: ${{ steps.config.outputs.path }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- STAC manifest files: $(find data/catalog -type f -name '*.json' 2>/dev/null | wc -l)" >> "$GITHUB_STEP_SUMMARY"
           echo "- NBS discovery outcome: ${{ steps.nbs.outcome }}" >> "$GITHUB_STEP_SUMMARY"
@@ -60,7 +65,7 @@ jobs:
       - name: Upload source-catalog artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nsat-${{ inputs.mode }}-source-catalog
+          name: nsat-${{ steps.config.outputs.mode }}-source-catalog
           path: |
             source-registry.json
             data/boundaries/
