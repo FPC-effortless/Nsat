@@ -93,14 +93,17 @@ jobs:
           PY
       - name: Summarize
         shell: bash
+        env:
+          BUILD_MODE: ${{ steps.scope.outputs.mode }}
         run: |
           python - <<'PY'
           import json
+          import os
           from pathlib import Path
           s = json.loads(Path('data/dataset/final/dataset_summary.json').read_text())
-          with open(Path(__import__('os').environ['GITHUB_STEP_SUMMARY']), 'a') as f:
+          with open(Path(os.environ['GITHUB_STEP_SUMMARY']), 'a') as f:
               f.write('## Nsat model-ready dataset\n')
-              f.write(f"- Mode: ${{{{ steps.scope.outputs.mode }}}}\n")
+              f.write(f"- Mode: {os.environ['BUILD_MODE']}\n")
               f.write(f"- Selected market-months: {s['selected_market_months']}\n")
               f.write(f"- Usable rows: {s['usable_rows']}\n")
               f.write(f"- Sentinel market-months OK: {s['s2_market_months_ok']}/{s['s2_market_months_total']}\n")
