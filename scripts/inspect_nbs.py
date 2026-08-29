@@ -9,7 +9,9 @@ from pathlib import Path
 import openpyxl
 import requests
 
-# Direct e-library table resources discovered from official NBS report pages.
+# Official NBS e-library and NADA resources used only for schema regression probes.
+# Production discovery is implemented in ngsatml.nbs_targets and must not depend
+# on this fixed list.
 RESOURCES = {
     "food_dec_2023": "https://nigerianstat.gov.ng/resource/selected_food_Dec_2023.xlsx",
     "food_jan_2024": "https://nigerianstat.gov.ng/resource/SELECTED_FOOD_JANUARY_2024.xlsx",
@@ -21,6 +23,10 @@ RESOURCES = {
     "cpi_oct_2024": "https://nigerianstat.gov.ng/resource/cpi_OCT2024.xlsx",
     "cohd_jan_2024": "https://nigerianstat.gov.ng/resource/COHD_January_2024_Table.xlsx",
     "cohd_sep_2024": "https://nigerianstat.gov.ng/resource/cohd_sept2024.xlsx",
+    "cpi_jan_2026": "https://microdata.nigerianstat.gov.ng/index.php/catalog/154/download/1353",
+    "cpi_jul_2026": "https://microdata.nigerianstat.gov.ng/index.php/catalog/154/download/1432",
+    "cohd_jan_feb_2026": "https://microdata.nigerianstat.gov.ng/index.php/catalog/146/download/1407",
+    "cohd_apr_2026": "https://microdata.nigerianstat.gov.ng/index.php/catalog/146/download/1428",
 }
 
 
@@ -45,7 +51,7 @@ def inspect_book(name: str, payload: bytes) -> dict:
             vals = [None if v is None else str(v) for v in row[:32]]
             if any(v not in (None, "") for v in vals):
                 rows.append({"row": idx, "values": vals})
-            if len(rows) >= 36:
+            if len(rows) >= 42:
                 break
         result["sheets"].append({
             "title": ws.title,
@@ -58,11 +64,11 @@ def inspect_book(name: str, payload: bytes) -> dict:
 
 def main(out_path: str) -> None:
     session = requests.Session()
-    session.headers.update({"User-Agent": "Nsat/0.3 (+https://github.com/FPC-effortless/Nsat)"})
+    session.headers.update({"User-Agent": "Nsat/0.4 (+https://github.com/FPC-effortless/Nsat)"})
     report = {}
     for key, url in RESOURCES.items():
         try:
-            response = session.get(url, timeout=(20, 40))
+            response = session.get(url, timeout=(20, 60))
             response.raise_for_status()
             payloads = workbook_payloads(response.content, response.headers.get("content-type", ""))
             report[key] = {
