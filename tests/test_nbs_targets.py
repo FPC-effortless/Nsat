@@ -9,7 +9,8 @@ import pandas as pd
 
 from ngsatml.cohd import add_cohd_targets, parse_state_cohd_workbook
 from ngsatml.cpi import add_cpi_targets, parse_state_food_cpi_workbook
-from ngsatml.nbs import NIGERIA_STATES
+from ngsatml.nbs import NIGERIA_STATES, normalize_state
+from ngsatml.nbs_mirror import parse_mirror_cohd, parse_mirror_cpi
 from ngsatml.nbs_targets import audit_panel
 
 
@@ -104,6 +105,56 @@ def test_cohd_parser_and_targets_cover_all_37_states():
     feb_abia = out[(out["state"] == "Abia") & (out["month"] == pd.Timestamp("2024-02-01"))].iloc[0]
     jan_abia = out[(out["state"] == "Abia") & (out["month"] == pd.Timestamp("2024-01-01"))].iloc[0]
     assert feb_abia["cohd_lag_1m"] == jan_abia["cohd_ngn_person_day"]
+
+
+def test_mirror_cpi_uses_index_columns_not_change_percentages():
+    rows = []
+    for i, state in enumerate(NIGERIA_STATES):
+        mirror_state = "Nassarawa" if state == "Nasarawa" else ("Abuja" if state == "FCT" else state)
+        rows.append({
+            "state": mirror_state,
+            "food": 80.0 + i,
+            "food_2": 110.0 + i,
+            "food_3": 115.0 + i,
+            "food_4": 30.0,
+            "food_5": 4.5,
+            "source_sheet": "CPI_February25.xlsx::Table-5",
+            "source_resource": "February 2025 CPI Tables",
+            "source_resource_id": "nbs-nada-154-test",
+            "source_url": "https://example.test/cpi",
+            "mirror_repo": "example/repo",
+            "transport": "huggingface-mirror",
+        })
+    parsed = parse_mirror_cpi(pd.DataFrame(rows))
+    assert len(parsed) == 74
+    abia = parsed[parsed["state"] == "Abia"].set_index("month")
+    assert abia.loc[pd.Timestamp("2025-01-01"), "food_cpi"] == 110.0
+    assert abia.loc[pd.Timestamp("2025-02-01"), "food_cpi"] == 115.0
+    assert not np.isclose(parsed["food_cpi"], 4.5).any()
+    assert "Nasarawa" in set(parsed["state"])
+
+
+def test_mirror_cohd_recovers_month_from_bundle_sheet():
+    rows = []
+    for i, state in enumerate(NIGERIA_STATES):
+        rows.append({
+            "state": "Federal Capital Territory" if state == "FCT" else state,
+            "cohd_average": 1500.0 + i,
+            "source_sheet": "April 2026_Table.xlsx::CoHD by national average",
+            "source_resource": "Cost of Healthy Diet Report January-April 2026",
+            "source_resource_id": "nbs-nada-146-test",
+            "source_url": "https://example.test/cohd",
+            "mirror_repo": "example/repo",
+            "transport": "huggingface-mirror",
+        })
+    parsed = parse_mirror_cohd(pd.DataFrame(rows))
+    assert len(parsed) == 37
+    assert parsed["month"].eq(pd.Timestamp("2026-04-01")).all()
+    assert "FCT" in set(parsed["state"])
+
+
+def test_normalize_state_accepts_legacy_nassarawa():
+    assert normalize_state("Nassarawa") == "Nasarawa"
 
 
 def test_panel_audit_detects_complete_and_missing_months():
