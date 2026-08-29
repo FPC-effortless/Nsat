@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+
+data/boundaries/*.geojson
+data/boundaries/*.json
+data/catalog/
+data/patches/
+data/features/
+data/nbs/raw/
+data/nbs/*.csv
+!data/README.md
