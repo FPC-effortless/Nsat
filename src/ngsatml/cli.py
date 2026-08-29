@@ -70,6 +70,7 @@ def cmd_nbs_targets(args: argparse.Namespace) -> None:
         start_date=args.start_date,
         end_date=args.end_date,
         strict=args.strict,
+        native_refresh=args.native_refresh,
     )
     print(json.dumps(summary, indent=2))
 
@@ -97,9 +98,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     nt = sub.add_parser("nbs-targets", help="Build nationwide NBS Food CPI and CoHD state-month targets")
     nt.add_argument("--output", default="data/nbs-targets")
-    nt.add_argument("--start-date", default="2023-10-01")
+    nt.add_argument("--start-date", default="2024-10-01")
     nt.add_argument("--end-date", default=None)
     nt.add_argument("--strict", action=argparse.BooleanOptionalAction, default=True)
+    nt.add_argument(
+        "--native-refresh",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="also attempt direct NBS NADA downloads; mirror transport remains available when the NBS host times out",
+    )
     nt.set_defaults(func=cmd_nbs_targets)
 
     ds = sub.add_parser("dataset")
