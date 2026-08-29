@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import re
 from io import BytesIO
-from typing import Iterable
 
 import pandas as pd
 import requests
 
-from .nbs import NIGERIA_STATES, month_from_text, normalize_state
+from .nbs import month_from_text, normalize_state
 
 HF_AUTHOR = "electricsheepafrica"
 HF_DATASETS_API = "https://huggingface.co/api/datasets"
@@ -55,16 +53,11 @@ def _source_month(row: pd.Series) -> pd.Timestamp | None:
     return None
 
 
-def _canonical_state_series(series: pd.Series) -> pd.Series:
-    return series.map(normalize_state)
-
-
 def parse_mirror_cohd(frame: pd.DataFrame) -> pd.DataFrame:
-    required = {"state", "cohd_average"}
-    if not required.issubset(frame.columns):
+    if not {"state", "cohd_average"}.issubset(frame.columns):
         return pd.DataFrame()
     rows = frame.copy()
-    rows["state"] = _canonical_state_series(rows["state"])
+    rows["state"] = rows["state"].map(normalize_state)
     rows = rows[rows["state"].notna()].copy()
     if "source_sheet" in rows:
         preferred = rows[rows["source_sheet"].astype(str).str.contains("national average", case=False, na=False)]
@@ -75,42 +68,37 @@ def parse_mirror_cohd(frame: pd.DataFrame) -> pd.DataFrame:
     rows = rows[rows["month"].notna() & rows["cohd_ngn_person_day"].gt(0)].copy()
     if rows.empty:
         return pd.DataFrame()
+    rows["source_workbook"] = rows.get("source_resource")
     keep = [
-        "state", "month", "cohd_ngn_person_day", "source_sheet", "source_resource",
-        "source_resource_id", "source_url", "retrieved_at", "mirror_repo", "transport",
+        "state", "month", "cohd_ngn_person_day", "source_sheet", "source_workbook",
+        "source_resource", "source_resource_id", "source_url", "retrieved_at", "mirror_repo", "transport",
     ]
     for col in keep:
         if col not in rows:
             rows[col] = None
     rows = rows[keep]
-    # Reject sheets that are not genuine all-state tables.
     good_months = rows.groupby("month")["state"].nunique()
     good_months = set(good_months[good_months >= 30].index)
     return rows[rows["month"].isin(good_months)].drop_duplicates(["state", "month", "source_resource_id"]).reset_index(drop=True)
 
 
-def _food_columns(frame: pd.DataFrame) -> list[str]:
-    # Electric Sheep preserves source-column order while making duplicate Food
-    # headers unique as food, food_2, ... . In NBS State CPI Table-5 the last
-    # raw Food column is the report month; annual/monthly-change headers have
-    # distinct names and therefore are not included here.
-    pattern = re.compile(r"^food(?:_(\d+))?$", re.I)
-    return [c for c in frame.columns if pattern.match(str(c))]
-
-
 def parse_mirror_cpi(frame: pd.DataFrame) -> pd.DataFrame:
-    if "state" not in frame.columns:
-        return pd.DataFrame()
-    food_cols = _food_columns(frame)
-    if not food_cols:
+    """Parse State CPI Table-5 from the provenance-preserving Parquet mirror.
+
+    NBS State CPI Table-5 is laid out as reference-year Food/All Items,
+    previous-month Food/All Items, report-month Food/All Items, annual change,
+    then monthly change. The mirror makes duplicate raw Food headers unique as
+    food, food_2, food_3, food_4, food_5. Therefore only food_2 and food_3 are
+    index levels useful here; food_4 and food_5 are percentages and must never
+    be treated as CPI levels.
+    """
+    if "state" not in frame.columns or "food_2" not in frame.columns or "food_3" not in frame.columns:
         return pd.DataFrame()
     rows = frame.copy()
-    rows["state"] = _canonical_state_series(rows["state"])
+    rows["state"] = rows["state"].map(normalize_state)
     rows = rows[rows["state"].notna()].copy()
     if rows.empty:
         return pd.DataFrame()
-
-    # Select only source sheets that contain near-complete state coverage.
     if "source_sheet" in rows:
         counts = rows.groupby("source_sheet")["state"].nunique()
         good_sheets = set(counts[counts >= 30].index)
@@ -118,26 +106,39 @@ def parse_mirror_cpi(frame: pd.DataFrame) -> pd.DataFrame:
     if rows.empty:
         return pd.DataFrame()
 
-    rows["month"] = rows.apply(_source_month, axis=1)
-    values = rows[food_cols].apply(pd.to_numeric, errors="coerce")
-    # Last non-null Food field in source order = report-month Food index.
-    rows["food_cpi"] = values.ffill(axis=1).iloc[:, -1]
-    rows = rows[rows["month"].notna() & rows["food_cpi"].gt(0)].copy()
+    rows["report_month"] = rows.apply(_source_month, axis=1)
+    rows["previous_food_cpi"] = pd.to_numeric(rows["food_2"], errors="coerce")
+    rows["report_food_cpi"] = pd.to_numeric(rows["food_3"], errors="coerce")
+    rows = rows[rows["report_month"].notna()].copy()
     if rows.empty:
         return pd.DataFrame()
-    rows["index_regime"] = rows["month"].map(lambda m: "2024-base" if m >= pd.Timestamp("2025-01-01") else "2009-11-base")
-    keep = [
-        "state", "month", "food_cpi", "index_regime", "source_sheet", "source_resource",
-        "source_resource_id", "source_url", "retrieved_at", "mirror_repo", "transport",
+
+    common = [
+        "state", "source_sheet", "source_resource", "source_resource_id", "source_url",
+        "retrieved_at", "mirror_repo", "transport",
     ]
-    for col in keep:
+    for col in common:
         if col not in rows:
             rows[col] = None
-    rows = rows[keep]
-    good_months = rows.groupby(["month", "index_regime"])["state"].nunique()
-    good_months = {key for key, count in good_months.items() if count >= 30}
-    mask = rows.apply(lambda r: (r["month"], r["index_regime"]) in good_months, axis=1)
-    return rows[mask].drop_duplicates(["state", "month", "index_regime", "source_resource_id"]).reset_index(drop=True)
+
+    current = rows[common].copy()
+    current["month"] = rows["report_month"]
+    current["food_cpi"] = rows["report_food_cpi"]
+    previous = rows[common].copy()
+    previous["month"] = rows["report_month"] - pd.DateOffset(months=1)
+    previous["food_cpi"] = rows["previous_food_cpi"]
+    out = pd.concat([previous, current], ignore_index=True)
+    out = out[out["food_cpi"].gt(0)].copy()
+    out["index_regime"] = out["month"].map(
+        lambda m: "2024-base" if m >= pd.Timestamp("2025-01-01") else "2009-11-base"
+    )
+    out["source_workbook"] = out["source_resource"]
+    good = out.groupby(["month", "index_regime"])["state"].nunique()
+    good = {key for key, count in good.items() if count >= 30}
+    mask = out.apply(lambda r: (r["month"], r["index_regime"]) in good, axis=1)
+    return out[mask].drop_duplicates(
+        ["state", "month", "index_regime", "source_resource_id"]
+    ).reset_index(drop=True)
 
 
 def load_all_mirror_targets(
