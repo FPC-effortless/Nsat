@@ -14,6 +14,17 @@ def _dataset_config(cfg: dict[str, Any]) -> dict[str, Any]:
     return cfg.get("dataset", {}) if isinstance(cfg.get("dataset", {}), dict) else {}
 
 
+def _optional_filter(cfg: dict[str, Any], key: str, default: list[str] | None = None) -> list[str] | None:
+    if key not in cfg:
+        return default
+    value = cfg[key]
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        raise ValueError(f"dataset.{key} must be a list or null")
+    return value or None
+
+
 def _assign_split(month: pd.Series, split_cfg: dict[str, Any]) -> pd.Series:
     if not split_cfg:
         return pd.Series(["unspecified"] * len(month), index=month.index, dtype="object")
@@ -46,10 +57,10 @@ def build_market_satellite_dataset(
     raw = read_wfp_csv(wfp_path)
     labels = normalize_prices(
         raw,
-        states=dcfg.get("states") or None,
-        commodities=dcfg.get("commodities") or None,
-        units=dcfg.get("units") or ["KG"],
-        pricetypes=dcfg.get("pricetypes") or None,
+        states=_optional_filter(dcfg, "states"),
+        commodities=_optional_filter(dcfg, "commodities"),
+        units=_optional_filter(dcfg, "units", ["KG"]),
+        pricetypes=_optional_filter(dcfg, "pricetypes"),
     )
     labels = add_calendar_targets(labels, tuple(int(x) for x in dcfg.get("price_lags_months", [1, 3, 12])))
 
@@ -63,7 +74,18 @@ def build_market_satellite_dataset(
         require_next_target=bool(dcfg.get("require_next_target", True)),
     )
     if selected.empty:
-        raise RuntimeError("No WFP market-months matched the configured period and filters")
+        start = pd.Timestamp(cfg["start_date"])
+        end = pd.Timestamp(cfg["end_date"])
+        period = labels[(labels["month"] >= start) & (labels["month"] < end)]
+        diagnostics = {
+            "normalized_rows": int(len(labels)),
+            "period_rows": int(len(period)),
+            "period_rows_with_next_month_target": int(period.get("target_price_ngn_1m", pd.Series(dtype=float)).notna().sum()),
+            "period_months": sorted(period["month"].dt.strftime("%Y-%m").unique().tolist())[-12:] if len(period) else [],
+            "units": sorted(period["unit"].dropna().astype(str).unique().tolist())[:25] if len(period) else [],
+            "commodities": sorted(period["commodity"].dropna().astype(str).unique().tolist())[:50] if len(period) else [],
+        }
+        raise RuntimeError(f"No WFP market-months matched the configured period and filters: {json.dumps(diagnostics)}")
 
     s2_cfg = cfg.get("sentinel2", {})
     patch_radius_m = float(dcfg.get("patch_radius_m", 1280.0))
@@ -144,6 +166,8 @@ def build_market_satellite_dataset(
         "states": sorted(dataset["admin1"].dropna().astype(str).unique().tolist()),
         "markets": int(dataset["market_id"].nunique()),
         "commodities": sorted(dataset["commodity"].dropna().astype(str).unique().tolist()),
+        "units": sorted(dataset["unit"].dropna().astype(str).unique().tolist()),
+        "pricetypes": sorted(dataset["pricetype"].dropna().astype(str).unique().tolist()),
         "outputs": {
             "all_csv": str(all_csv),
             "all_parquet": str(all_parquet),
