@@ -9,6 +9,7 @@ from .config import load_config
 from .dataset import build_market_satellite_dataset
 from .geometry import state_bboxes
 from .nbs import discover_downloads, save_resource_index
+from .nbs_targets import build_nbs_state_targets
 from .sources import SOURCES
 from .stac import CatalogQuery, month_windows, search_items, write_manifest
 
@@ -63,6 +64,17 @@ def cmd_nbs(args: argparse.Namespace) -> None:
     print(f"Discovered {len(resources)} NBS download resources -> {target}")
 
 
+def cmd_nbs_targets(args: argparse.Namespace) -> None:
+    summary = build_nbs_state_targets(
+        args.output,
+        start_date=args.start_date,
+        end_date=args.end_date,
+        strict=args.strict,
+        native_refresh=args.native_refresh,
+    )
+    print(json.dumps(summary, indent=2))
+
+
 def cmd_dataset(args: argparse.Namespace) -> None:
     cfg = load_config(args.config)
     summary = build_market_satellite_dataset(
@@ -83,6 +95,19 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--config", default="configs/pilot.yaml")
         sp.add_argument("--output", default="data")
         sp.set_defaults(func=func)
+
+    nt = sub.add_parser("nbs-targets", help="Build nationwide NBS Food CPI and CoHD state-month targets")
+    nt.add_argument("--output", default="data/nbs-targets")
+    nt.add_argument("--start-date", default="2024-10-01")
+    nt.add_argument("--end-date", default=None)
+    nt.add_argument("--strict", action=argparse.BooleanOptionalAction, default=True)
+    nt.add_argument(
+        "--native-refresh",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="also attempt direct NBS NADA downloads; mirror transport remains available when the NBS host times out",
+    )
+    nt.set_defaults(func=cmd_nbs_targets)
 
     ds = sub.add_parser("dataset")
     ds.add_argument("--config", default="configs/dataset-smoke.yaml")

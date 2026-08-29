@@ -1,0 +1,32 @@
+name: Probe NBS Hugging Face mirrors
+
+on:
+  push:
+    branches: [data/nbs-national-upgrade-v2]
+    paths:
+      - 'scripts/probe_hf_nbs_mirrors.py'
+      - '.github/workflows/probe-hf-nbs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install probe dependencies
+        run: python -m pip install pandas pyarrow requests
+      - name: Probe standardized mirrors
+        run: python scripts/probe_hf_nbs_mirrors.py data/nbs/hf_mirror_probe.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hf-nbs-mirror-probe
+          path: data/nbs/hf_mirror_probe.json
+          if-no-files-found: error
+          retention-days: 7

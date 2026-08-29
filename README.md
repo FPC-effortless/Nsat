@@ -1,69 +1,54 @@
 # Nsat
 
-Nigeria-focused satellite ML research and dataset engineering.
+Nigeria-focused satellite, environmental, and food-price ML dataset engineering.
 
-Nsat is building a reproducible pipeline that combines Nigerian satellite observations with weather, terrain, land-cover, and public socioeconomic/agricultural data for small-model experiments.
+Nsat builds reproducible training tables that combine Nigerian market prices, nationwide NBS economic targets, weather, and Earth-observation features without mirroring large raw satellite archives into Git.
 
-## First benchmark
+## Current data products
 
-The first supervised task is **state-month food-price risk**.
+### 1. Market food-price forecasting layer
 
-Satellite observations are sampled at patch level, aggregated to state-month features, then joined to National Bureau of Statistics (NBS) food-price targets. This avoids treating many image patches carrying the same state-level price as independent training labels.
+Grain: **market × month × commodity × canonical unit × price type**.
 
-### MVP geography
+Primary source: WFP Nigeria market-price history. The builder normalizes package units, creates exact-calendar price lags, next-month targets, temporal split metadata, NASA POWER climate features, and optional Sentinel-2 market-patch features.
 
-- Kano
-- Kaduna
-- Niger
-- Benue
-- Oyo
+### 2. Nationwide NBS state target layer
 
-### Primary data sources
+Grain: **state × month** for all **36 states + FCT**.
 
-- Sentinel-2 L2A — optical multispectral imagery via Element 84 Earth Search STAC.
-- Sentinel-1 GRD — radar imagery via Earth Search STAC.
-- Copernicus DEM GLO-30 — elevation.
-- ESA WorldCover 2021 — 10 m land-cover map for cropland candidate selection.
-- geoBoundaries gbOpen NGA ADM1 — Nigerian state boundaries, CC BY 4.0.
-- NASA GPM IMERG V07 — rainfall features.
-- Nigeria NBS Selected Food Price Watch — state-level monthly price targets.
+Two official NBS series are materialized independently:
 
-See `DATA_SOURCES.md` for source and licensing notes.
+- **Food CPI** — state-level food-price pressure. CPI index regimes are kept separate across the 2025 rebasing; raw index levels are never bridged blindly across the base change.
+- **Cost of a Healthy Diet (CoHD)** — state-level Naira/person/day affordability-cost signal.
 
-## What the current MVP does
+The validated v2 build currently materializes:
 
-The checked-in pipeline can:
+- Food CPI: 777 rows = 21 consecutive months × 37 states, October 2024 through June 2026.
+- CoHD: 703 rows = 19 consecutive months × 37 states, October 2024 through April 2026.
 
-1. validate source configuration;
-2. download and filter Nigerian ADM1 boundaries;
-3. query Sentinel-1 and Sentinel-2 scene metadata without downloading whole scenes;
-4. save compact STAC manifests;
-5. discover NBS downloadable resources;
-6. compute core feature/aggregation utilities;
-7. enforce temporal train/validation/test splitting;
-8. run unit tests in GitHub Actions.
+The strict quality gate found no incomplete months, internal calendar gaps, unknown states, duplicate keys, null target values, or non-positive target values in that build.
 
-The current workflow does **not yet claim to materialize a complete satellite training table**. COG window extraction, WorldCover-constrained patch sampling, IMERG materialization, robust NBS spreadsheet parsing, and final benchmark training are the next implementation layers.
+### 3. Satellite/environmental enrichment
 
-## Dataset design
+- Sentinel-2 L2A optical observations via Element 84 Earth Search STAC.
+- Sentinel-1 GRD radar metadata/extraction infrastructure.
+- NASA POWER climate features.
+- Copernicus DEM and ESA WorldCover source registry/support.
+- geoBoundaries Nigerian ADM1 boundaries.
 
-### Patch table — auxiliary
+Satellite imagery is streamed/cropped from remote assets rather than downloaded nationwide.
 
-One record per sampled observation patch:
+## Important correction: Selected Food Price Watch
 
-- `state`
-- `patch_id`
-- `date`
-- centroid coordinates
-- Sentinel scene IDs and metadata
-- source asset references
-- derived optical/radar statistics when enabled
+NBS Selected Food Price Watch is **not** treated as a complete 37-state × commodity supervision matrix. Its downloadable report tables provide national/zonal item averages and selected state extrema, so Nsat uses it only for commodity-level validation where the published grain supports the comparison.
 
-The patch table is not the direct supervised target table.
+For nationwide state supervision, Nsat uses State Food CPI and CoHD instead. WFP remains the granular market/commodity target source.
 
-### State-month table — supervised
+## Provenance and transport resilience
 
-One record per state and month, containing aggregated vegetation/radar/weather features plus the corresponding NBS target.
+Nigeria NBS remains the canonical publisher for CPI and CoHD. The NBS NADA host can be intermittently unreachable from GitHub-hosted runners, so the default reproducible build can use Electric Sheep Africa's Hugging Face Parquet copies as a **transport mirror**. Those mirrored rows retain the original NBS resource IDs, URLs, resource titles, retrieval timestamps, and source-sheet provenance.
+
+Run with direct NBS refresh only when desired; source-network failures are recorded separately from data-quality failures.
 
 ## Install
 
@@ -73,40 +58,63 @@ Python 3.11+:
 pip install -e '.[dev]'
 ```
 
-For raster/geospatial processing later:
-
-```bash
-pip install -e '.[geo,dev]'
-```
-
-## Local commands
+## Core commands
 
 ```bash
 python -m ngsatml.cli sources
 python -m ngsatml.cli boundaries --config configs/smoke.yaml
 python -m ngsatml.cli catalog --config configs/smoke.yaml
-python -m ngsatml.cli nbs --config configs/smoke.yaml
+python -m ngsatml.cli dataset --config configs/dataset-smoke.yaml
+
+# Build nationwide NBS target layer
+python -m ngsatml.cli nbs-targets \
+  --output data/nbs-targets \
+  --start-date 2024-10-01 \
+  --strict
+
 pytest -q
 ```
 
+## NBS target artifact contract
+
+A successful build writes:
+
+- `nbs_food_cpi.parquet` / `.csv`
+- `nbs_cohd.parquet` / `.csv`
+- `nbs_state_month_targets.parquet`
+- `nbs_source_index.csv`
+- `nbs_quality.json`
+- `nbs_summary.json`
+- workflow-generated `SHA256SUMS.txt`
+
+Food CPI contains exact-calendar lags at 1/2/3/6/12 months and next-month index/change targets. CoHD uses the same temporal discipline. Missing months are never forward-filled.
+
 ## GitHub Actions
 
-- **CI** runs the unit test suite on pushes and pull requests.
-- **Build source catalog** is manually runnable from the Actions tab. `smoke` mode covers Kano for a short period; `pilot` mode covers the five-state 2022–2026 pilot. The workflow uploads generated boundaries, STAC manifests, and the NBS resource index as an Actions artifact.
+- **CI** — repository tests.
+- **Build source catalog** — boundaries/STAC/source discovery.
+- **Build training-grade dataset** — WFP + climate + optional Sentinel path.
+- **Build nationwide NBS targets** — monthly scheduled/manual build with strict 37-state completeness, continuity, validity, artifact-contract, and checksum gates.
+
+The NBS workflow publishes a compact validated artifact rather than raw upstream workbooks.
+
+## Modeling hierarchy
+
+For market-level forecasting, compare progressively:
+
+1. seasonal/price-history baseline;
+2. + nationwide NBS state context (Food CPI/CoHD, current or lagged only);
+3. + weather;
+4. + satellite features.
+
+For state-level NBS forecasting, aggregate predictors to state-month before training. Do **not** replicate one state-month NBS label across many market or image-patch rows and treat those rows as independent labels.
 
 ## Scientific guardrails
 
-- Split forecasting data by time, not random rows.
-- Keep state-level NBS labels at state-month granularity.
-- Track missing satellite/cloud coverage explicitly.
-- Never leak future-month prices into earlier features.
-- Establish strong price-only and weather-only baselines before claiming satellite signal adds predictive value.
-
-## Minimum benchmark
-
-1. Seasonal naive baseline.
-2. Lagged-price baseline.
-3. Weather + lagged-price model.
-4. Satellite + weather + lagged-price model.
-
-Satellite inputs are justified only if model 4 improves genuinely out-of-time performance over the simpler baselines.
+- use contiguous temporal validation/test splits;
+- use exact calendar lags rather than row shifts across missing months;
+- never use next-month target columns as predictors;
+- never compare raw Food CPI levels across index regimes as if the base were unchanged;
+- preserve source provenance and missingness;
+- treat NBS state targets, WFP market targets, and satellite patch observations as different grains;
+- require out-of-time improvement over price-history and weather baselines before claiming satellite signal adds predictive value.
