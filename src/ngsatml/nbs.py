@@ -37,6 +37,7 @@ _STATE_ALIASES = {
     "cross river": "Cross River",
     "crossriver": "Cross River",
     "nasarawa": "Nasarawa",
+    "nassarawa": "Nasarawa",
 }
 for _state in NIGERIA_STATES:
     _STATE_ALIASES.setdefault(_state.casefold(), _state)
@@ -56,8 +57,6 @@ _MONTHS = {
     "december": 12, "dec": 12,
 }
 
-# Deliberately conservative mapping. Only entries with an unambiguous WFP analogue
-# are used in cross-source comparisons.
 _WFP_MAP = [
     (re.compile(r"rice.*local|local.*rice", re.I), "Rice (local)"),
     (re.compile(r"rice.*import", re.I), "Rice (imported)"),
@@ -124,12 +123,7 @@ def canonical_wfp_commodity(item: str) -> str | None:
 
 
 def parse_item_unit(item: str) -> tuple[str, float, str]:
-    """Return canonical unit, package quantity in that unit, and family.
-
-    NBS item labels commonly encode units in the item name (1kg, 500g,
-    12 pieces, one bottle). Unknown package definitions are retained as
-    package-level values and are excluded from cross-source unit comparisons.
-    """
+    """Return canonical unit, package quantity in that unit, and family."""
     text = item.casefold().replace(",", " ")
     match = re.search(r"(\d+(?:\.\d+)?)\s*(kg|kilograms?|g|grams?|litres?|liters?|ltr|l\b|pieces?|pcs\b|tubers?)", text)
     if match:
@@ -150,12 +144,7 @@ def parse_item_unit(item: str) -> tuple[str, float, str]:
 
 
 def discover_downloads(session: requests.Session | None = None) -> list[NBSResource]:
-    """Discover NBS NADA resources, best-effort.
-
-    The NADA host is occasionally slow from GitHub runners, so production
-    builds should prefer direct e-library table links and use this as a recent
-    resource supplement rather than the sole source.
-    """
+    """Discover NBS NADA resources, best-effort."""
     s = session or requests.Session()
     r = s.get(CATALOG_URL, timeout=(15, 30))
     r.raise_for_status()
@@ -179,335 +168,97 @@ def discover_elibrary_table_downloads(
     end_date: str | pd.Timestamp | None = None,
     session: requests.Session | None = None,
 ) -> list[NBSResource]:
-    """Discover direct XLS/XLSX table files from archived NBS report pages."""
+    """Discover direct e-library table workbooks without assuming filenames."""
     s = session or requests.Session()
-    s.headers.setdefault("User-Agent", "Nsat/0.3 (+https://github.com/FPC-effortless/Nsat)")
-    response = s.get(ELIBRARY_URL, timeout=(20, 60))
+    response = s.get(ELIBRARY_URL, timeout=(15, 30))
     response.raise_for_status()
     body = response.text
-    start = pd.Timestamp(start_date)
-    end = pd.Timestamp(end_date) if end_date is not None else pd.Timestamp.utcnow().tz_localize(None) + pd.offsets.MonthBegin(1)
-
-    candidates: dict[str, tuple[str, pd.Timestamp]] = {}
-    anchor_pattern = re.compile(
-        r'<a[^>]+href=["\']([^"\']*/elibrary/read/\d+)["\'][^>]*>(.*?)</a>',
-        re.I | re.S,
-    )
-    for href, label_html in anchor_pattern.findall(body):
-        label = _clean_text(label_html)
-        if "selected food prices watch" not in label.casefold():
+    start = pd.Timestamp(start_date).to_period("M").to_timestamp()
+    end = pd.Timestamp(end_date).to_period("M").to_timestamp() if end_date is not None else None
+    report_links: list[tuple[str, pd.Timestamp]] = []
+    for href, label in re.findall(r'href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', body, flags=re.I | re.S):
+        text = _clean_text(label)
+        month = month_from_text(text)
+        if month is None or "food" not in text.casefold() or "price" not in text.casefold():
             continue
-        month = month_from_text(label)
-        if month is None or not (start <= month < end):
+        if month < start or (end is not None and month >= end):
             continue
-        candidates[urljoin(ELIBRARY_URL, href)] = (label, month)
+        report_links.append((urljoin(ELIBRARY_URL, href), month))
 
-    # Some versions of the e-library render the report label outside the anchor.
-    if not candidates:
-        fallback = re.compile(
-            r'href=["\']([^"\']*/elibrary/read/\d+)["\'][^>]*>.*?</a>.{0,300}?Selected Food Prices Watch\s*\(([^)]+)\)',
-            re.I | re.S,
-        )
-        for href, label_part in fallback.findall(body):
-            label = f"Selected Food Prices Watch ({_clean_text(label_part)})"
-            month = month_from_text(label)
-            if month is not None and start <= month < end:
-                candidates[urljoin(ELIBRARY_URL, href)] = (label, month)
-
-    resources: list[NBSResource] = []
-    for page_url, (title, month) in sorted(candidates.items(), key=lambda x: x[1][1]):
+    results: dict[str, NBSResource] = {}
+    for page_url, month in report_links:
         try:
-            page = s.get(page_url, timeout=(15, 35))
+            page = s.get(page_url, timeout=(15, 30))
             page.raise_for_status()
         except requests.RequestException:
             continue
-        links = re.findall(r'href=["\']([^"\']+\.(?:xlsx|xls)(?:\?[^"\']*)?)["\']', page.text, re.I)
-        if not links:
-            continue
-        # Prefer a link whose nearby context says tables; report pages generally
-        # expose one table workbook and one PDF report.
-        url = urljoin(page_url, links[0])
-        resources.append(NBSResource(title=title, url=url, month=month, source_page=page_url, source="elibrary"))
-    return resources
+        for href, label in re.findall(r'href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', page.text, flags=re.I | re.S):
+            text = _clean_text(label)
+            absolute = urljoin(page_url, href)
+            if absolute.lower().endswith((".xlsx", ".xls")) or "download table" in text.casefold():
+                results.setdefault(absolute, NBSResource(title=text or f"NBS table {month:%Y-%m}", url=absolute, month=month, source_page=page_url, source="elibrary"))
+    return list(results.values())
 
 
-def workbook_payloads(content: bytes, *, fallback_name: str = "download.xlsx") -> list[tuple[str, bytes]]:
-    if content[:2] == b"PK":
-        try:
-            with zipfile.ZipFile(BytesIO(content)) as zf:
-                files = [n for n in zf.namelist() if n.lower().endswith((".xlsx", ".xlsm"))]
-                if files:
-                    return [(Path(name).name, zf.read(name)) for name in files]
-        except zipfile.BadZipFile:
-            pass
+def workbook_payloads(content: bytes, fallback_name: str = "download.xlsx") -> list[tuple[str, bytes]]:
+    if zipfile.is_zipfile(BytesIO(content)):
+        with zipfile.ZipFile(BytesIO(content)) as zf:
+            names = [n for n in zf.namelist() if not n.endswith("/") and n.lower().endswith((".xlsx", ".xlsm", ".xls"))]
+            if names:
+                return [(Path(n).name, zf.read(n)) for n in names]
     return [(fallback_name, content)]
 
 
-def download_resource(
-    resource: NBSResource,
-    cache_dir: str | Path,
-    *,
-    session: requests.Session | None = None,
-) -> list[Path]:
-    cache = Path(cache_dir)
-    cache.mkdir(parents=True, exist_ok=True)
-    s = session or requests.Session()
-    s.headers.setdefault("User-Agent", "Nsat/0.3 (+https://github.com/FPC-effortless/Nsat)")
-    response = s.get(resource.url, timeout=(20, 60))
-    response.raise_for_status()
-    fallback = Path(resource.url.split("?", 1)[0]).name or "download.xlsx"
-    paths: list[Path] = []
-    for idx, (name, payload) in enumerate(workbook_payloads(response.content, fallback_name=fallback)):
-        month = month_from_text(name) or resource.month
-        prefix = month.strftime("%Y-%m") if month is not None else "unknown-month"
-        safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", name)
-        target = cache / f"{prefix}_{idx:02d}_{safe_name}"
-        target.write_bytes(payload)
-        paths.append(target)
-    return paths
+def _find_header_row(raw: pd.DataFrame, required_any: Iterable[str]) -> int | None:
+    needles = {x.casefold() for x in required_any}
+    for idx, row in raw.iterrows():
+        values = {_clean_text(v).casefold() for v in row.tolist() if _clean_text(v)}
+        if values & needles:
+            return int(idx)
+    return None
 
 
-def _to_number(value: object) -> float | None:
-    if value is None or isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float, np.number)):
-        number = float(value)
-        return number if math.isfinite(number) else None
-    text = _clean_text(value).replace(",", "").replace("₦", "").replace("N", "")
-    text = text.replace("-", "") if re.fullmatch(r"\s*-\s*", str(value)) else text
-    match = re.search(r"-?\d+(?:\.\d+)?", text)
-    if not match:
-        return None
-    try:
-        number = float(match.group(0))
-    except ValueError:
-        return None
-    return number if math.isfinite(number) else None
+def parse_table_workbook(content: bytes, resource: NBSResource) -> pd.DataFrame:
+    """Conservatively parse Selected Food Price Watch workbooks.
 
-
-def _item_label(rows: list[list[object]], first_state_row: int, col: int, sheet: str) -> str:
-    pieces: list[str] = []
-    start = max(0, first_state_row - 6)
-    for r in range(start, first_state_row):
-        if col >= len(rows[r]):
-            continue
-        text = _clean_text(rows[r][col])
-        if not text:
-            continue
-        if text.casefold() in {"state", "states", "s/n", "sn", "average price", "avg price", "price"}:
-            continue
-        if text not in pieces:
-            pieces.append(text)
-    if not pieces and sheet:
-        pieces = [_clean_text(sheet)]
-    return " | ".join(pieces).strip(" |")
-
-
-def parse_state_price_workbook(
-    payload: bytes,
-    *,
-    month: pd.Timestamp,
-    source_url: str,
-    workbook_name: str = "workbook.xlsx",
-) -> pd.DataFrame:
-    """Extract state-level price cells without assuming a fixed NBS sheet layout.
-
-    The parser finds columns containing Nigerian state names, then melts numeric
-    columns across those state rows. It therefore tolerates title/header rows and
-    multi-sheet workbooks that changed format over time.
+    These tables are useful for national/zonal commodity validation. They are
+    not assumed to contain a full state x commodity matrix.
     """
-    wb = openpyxl.load_workbook(BytesIO(payload), read_only=True, data_only=True)
-    records: list[dict[str, object]] = []
-
-    for ws in wb.worksheets:
-        rows: list[list[object]] = []
-        max_cols = min(int(ws.max_column or 0), 120)
-        for ridx, row in enumerate(ws.iter_rows(values_only=True), start=0):
-            rows.append(list(row[:max_cols]))
-            if ridx >= 180:
-                break
-        if not rows or max_cols == 0:
+    frames: list[pd.DataFrame] = []
+    for name, payload in workbook_payloads(content):
+        if not payload.startswith(b"PK"):
             continue
-
-        best_col = None
-        best_matches: list[tuple[int, str]] = []
-        for col in range(max_cols):
-            matches: list[tuple[int, str]] = []
-            for ridx, row in enumerate(rows):
-                if col >= len(row):
-                    continue
-                state = normalize_state(row[col])
-                if state is not None:
-                    matches.append((ridx, state))
-            unique_states = {state for _, state in matches}
-            if len(unique_states) > len({s for _, s in best_matches}):
-                best_col = col
-                best_matches = matches
-
-        unique_states = {s for _, s in best_matches}
-        if best_col is None or len(unique_states) < 15:
-            continue
-        state_rows = sorted({ridx for ridx, _ in best_matches})
-        first_state_row = min(state_rows)
-
-        for col in range(max_cols):
-            if col == best_col:
+        wb = openpyxl.load_workbook(BytesIO(payload), read_only=True, data_only=True)
+        for ws in wb.worksheets:
+            values = list(ws.values)
+            if not values:
                 continue
-            label = _item_label(rows, first_state_row, col, ws.title)
-            label_low = label.casefold()
-            if not label or any(token in label_low for token in ["% change", "percent change", "percentage change", "rank", "position"]):
+            raw = pd.DataFrame(values)
+            header_idx = _find_header_row(raw.head(30), {"item", "items", "commodity", "food item"})
+            if header_idx is None:
                 continue
-            values: list[tuple[str, float]] = []
-            for ridx, state in best_matches:
-                if ridx >= len(rows) or col >= len(rows[ridx]):
-                    continue
-                number = _to_number(rows[ridx][col])
-                if number is not None and number > 0:
-                    values.append((state, number))
-            if len({state for state, _ in values}) < 10:
-                continue
-
-            unit, quantity, family = parse_item_unit(label)
-            mapped = canonical_wfp_commodity(label)
-            for state, price in values:
-                records.append({
-                    "state": state,
-                    "month": pd.Timestamp(month).to_period("M").to_timestamp(),
-                    "item": label,
-                    "wfp_commodity": mapped,
-                    "unit": unit,
-                    "unit_family": family,
-                    "unit_quantity": quantity,
-                    "price_ngn": float(price),
-                    "price_ngn_base": float(price / quantity) if quantity > 0 else np.nan,
-                    "source_sheet": ws.title,
-                    "source_workbook": workbook_name,
-                    "source_url": source_url,
-                })
-
-    if not records:
-        return pd.DataFrame(columns=[
-            "state", "month", "item", "wfp_commodity", "unit", "unit_family",
-            "unit_quantity", "price_ngn", "price_ngn_base", "source_sheet",
-            "source_workbook", "source_url",
-        ])
-    out = pd.DataFrame(records)
-    out = out.drop_duplicates(["state", "month", "item", "source_sheet", "source_workbook"])
-    return out.sort_values(["month", "state", "item"]).reset_index(drop=True)
+            header = [_clean_text(v) or f"column_{i}" for i, v in enumerate(raw.iloc[header_idx].tolist())]
+            table = raw.iloc[header_idx + 1:].copy()
+            table.columns = header
+            table = table.dropna(how="all")
+            table["source_workbook"] = name
+            table["source_sheet"] = ws.title
+            table["source_url"] = resource.url
+            table["report_month"] = resource.month
+            frames.append(table)
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
-def parse_workbook_file(path: str | Path, *, month: pd.Timestamp, source_url: str) -> pd.DataFrame:
-    p = Path(path)
-    return parse_state_price_workbook(p.read_bytes(), month=month, source_url=source_url, workbook_name=p.name)
-
-
-def consolidate_state_prices(frames: Iterable[pd.DataFrame]) -> pd.DataFrame:
-    parts = [f for f in frames if f is not None and not f.empty]
-    if not parts:
-        return pd.DataFrame()
-    data = pd.concat(parts, ignore_index=True)
-    key = ["state", "month", "item", "unit"]
-    agg = {
-        "wfp_commodity": "first",
-        "unit_family": "first",
-        "unit_quantity": "first",
-        "price_ngn": "median",
-        "price_ngn_base": "median",
-        "source_sheet": lambda s: "|".join(sorted(set(map(str, s)))),
-        "source_workbook": lambda s: "|".join(sorted(set(map(str, s)))),
-        "source_url": lambda s: "|".join(sorted(set(map(str, s)))),
-    }
-    return data.groupby(key, dropna=False, as_index=False).agg(agg).sort_values(key).reset_index(drop=True)
-
-
-def add_state_calendar_targets(
-    frame: pd.DataFrame,
-    *,
-    lags: tuple[int, ...] = (1, 2, 3, 6, 12),
-) -> pd.DataFrame:
-    if frame.empty:
-        return frame.copy()
-    keys = ["state", "item", "unit"]
-    out = frame.copy()
-    lookup = out[keys + ["month", "price_ngn_base"]].drop_duplicates(keys + ["month"])
-    for lag in lags:
-        prior = lookup.copy()
-        prior["month"] = prior["month"] + pd.DateOffset(months=lag)
-        prior = prior.rename(columns={"price_ngn_base": f"price_lag_{lag}m"})
-        out = out.merge(prior, on=keys + ["month"], how="left")
-    future = lookup.copy()
-    future["month"] = future["month"] - pd.DateOffset(months=1)
-    future = future.rename(columns={"price_ngn_base": "target_price_ngn_1m"})
-    out = out.merge(future, on=keys + ["month"], how="left")
-    out["target_month"] = out["month"] + pd.DateOffset(months=1)
-    out["target_log_change_1m"] = np.where(
-        (out["price_ngn_base"] > 0) & (out["target_price_ngn_1m"] > 0),
-        np.log(out["target_price_ngn_1m"] / out["price_ngn_base"]),
-        np.nan,
-    )
-    out["target_change_1m_pct"] = np.where(
-        out["price_ngn_base"] > 0,
-        (out["target_price_ngn_1m"] - out["price_ngn_base"]) / out["price_ngn_base"],
-        np.nan,
-    )
-    out["year"] = out["month"].dt.year.astype("int16")
-    out["month_number"] = out["month"].dt.month.astype("int8")
-    angle = 2 * math.pi * (out["month_number"].astype(float) - 1) / 12
-    out["month_sin"] = np.sin(angle)
-    out["month_cos"] = np.cos(angle)
-    lag_cols = [f"price_lag_{lag}m" for lag in lags]
-    out["lag_feature_count"] = out[lag_cols].notna().sum(axis=1).astype("int8")
-    out["quality_suspicious"] = out["target_log_change_1m"].abs().gt(math.log(5)).fillna(False)
-    return out
-
-
-def aggregate_wfp_state_month(wfp: pd.DataFrame) -> pd.DataFrame:
-    required = {"admin1", "month", "commodity", "unit", "price_ngn"}
-    missing = required - set(wfp.columns)
-    if missing:
-        raise ValueError(f"WFP frame missing columns: {sorted(missing)}")
-    work = wfp.copy()
-    work["state"] = work["admin1"].map(normalize_state)
-    work = work[work["state"].notna()]
-    return (
-        work.groupby(["state", "month", "commodity", "unit"], as_index=False)
-        .agg(
-            wfp_price_ngn=("price_ngn", "median"),
-            wfp_market_rows=("market_id", "size") if "market_id" in work.columns else ("price_ngn", "size"),
-            wfp_markets=("market_id", "nunique") if "market_id" in work.columns else ("price_ngn", "size"),
-        )
-    )
-
-
-def build_wfp_overlap(nbs: pd.DataFrame, wfp: pd.DataFrame) -> pd.DataFrame:
-    if nbs.empty or wfp.empty:
-        return pd.DataFrame()
-    n = nbs[nbs["wfp_commodity"].notna() & nbs["unit"].isin(["kg", "l", "item"])].copy()
-    n = n.rename(columns={"price_ngn_base": "nbs_price_ngn"})
-    w = aggregate_wfp_state_month(wfp)
-    merged = n.merge(
-        w,
-        left_on=["state", "month", "wfp_commodity", "unit"],
-        right_on=["state", "month", "commodity", "unit"],
-        how="inner",
-    )
-    merged["nbs_wfp_ratio"] = merged["nbs_price_ngn"] / merged["wfp_price_ngn"]
-    merged["nbs_wfp_log_ratio"] = np.log(merged["nbs_wfp_ratio"])
-    merged["nbs_wfp_abs_pct_diff"] = (merged["nbs_price_ngn"] - merged["wfp_price_ngn"]).abs() / merged["wfp_price_ngn"]
-    return merged.sort_values(["month", "state", "wfp_commodity"]).reset_index(drop=True)
-
-
-def save_resource_index(resources: list[NBSResource], path: str | Path) -> Path:
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
+def save_resource_index(resources: list[NBSResource], path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame([
         {
             "title": r.title,
             "url": r.url,
-            "month": r.month.strftime("%Y-%m-%d") if r.month is not None else None,
+            "month": None if r.month is None else r.month.strftime("%Y-%m-%d"),
             "source_page": r.source_page,
             "source": r.source,
         }
         for r in resources
-    ]).to_csv(p, index=False)
-    return p
+    ]).to_csv(path, index=False)
+    return path
