@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .boundaries import download_adm1, filter_states_geojson
 from .config import load_config
+from .dataset import build_market_satellite_dataset
 from .geometry import state_bboxes
 from .nbs import discover_downloads, save_resource_index
 from .sources import SOURCES
@@ -55,6 +56,16 @@ def cmd_nbs(args: argparse.Namespace) -> None:
     print(f"Discovered {len(resources)} NBS download resources -> {target}")
 
 
+def cmd_dataset(args: argparse.Namespace) -> None:
+    cfg = load_config(args.config)
+    summary = build_market_satellite_dataset(
+        cfg,
+        args.output,
+        market_month_limit=args.max_market_months,
+    )
+    print(json.dumps(summary, indent=2))
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="ngsatml")
     sub = p.add_subparsers(dest="command", required=True)
@@ -65,6 +76,12 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--config", default="configs/pilot.yaml")
         sp.add_argument("--output", default="data")
         sp.set_defaults(func=func)
+
+    ds = sub.add_parser("dataset")
+    ds.add_argument("--config", default="configs/dataset-smoke.yaml")
+    ds.add_argument("--output", default="data/dataset")
+    ds.add_argument("--max-market-months", type=int, default=None)
+    ds.set_defaults(func=cmd_dataset)
     return p
 
 
