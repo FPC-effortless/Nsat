@@ -1,0 +1,75 @@
+name: Build source catalog
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Dataset scope
+        required: true
+        default: smoke
+        type: choice
+        options:
+          - smoke
+          - pilot
+
+permissions:
+  contents: read
+
+jobs:
+  catalog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e '.[dev]'
+      - name: Select configuration
+        id: config
+        shell: bash
+        run: |
+          MODE="${{ github.event.inputs.mode }}"
+          if [ -z "$MODE" ]; then MODE="smoke"; fi
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          if [ "$MODE" = "pilot" ]; then
+            echo "path=configs/pilot.yaml" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=configs/smoke.yaml" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Record source registry
+        run: python -m ngsatml.cli sources > source-registry.json
+      - name: Build Nigeria state boundaries
+        run: python -m ngsatml.cli boundaries --config '${{ steps.config.outputs.path }}' --output data
+      - name: Query Sentinel catalogs
+        run: python -m ngsatml.cli catalog --config '${{ steps.config.outputs.path }}' --output data
+      - name: Discover NBS resources
+        id: nbs
+        continue-on-error: true
+        run: python -m ngsatml.cli nbs --config '${{ steps.config.outputs.path }}' --output data
+      - name: Summarize output
+        shell: bash
+        run: |
+          echo "## Nsat source catalog" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Mode: ${{ steps.config.outputs.mode }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Config: ${{ steps.config.outputs.path }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- STAC manifest files: $(find data/catalog -type f -name '*.json' 2>/dev/null | wc -l)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- NBS discovery outcome: ${{ steps.nbs.outcome }}" >> "$GITHUB_STEP_SUMMARY"
+          du -sh data 2>/dev/null || true
+      - name: Upload source-catalog artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nsat-${{ steps.config.outputs.mode }}-source-catalog
+          path: |
+            source-registry.json
+            data/boundaries/
+            data/catalog/
+            data/nbs/
+          if-no-files-found: warn
+          retention-days: 14

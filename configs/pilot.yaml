@@ -1,0 +1,57 @@
+project: nigeria-satellite-ml
+seed: 20260829
+states:
+  - Kano
+  - Kaduna
+  - Niger
+  - Benue
+  - Oyo
+start_date: '2022-01-01'
+end_date: '2026-06-01'
+
+sampling:
+  patches_per_state: 64
+  patch_size_m: 2560
+  require_cropland: true
+  worldcover_cropland_class: 40
+
+sentinel2:
+  collection: sentinel-2-l2a
+  cloud_cover_max: 60
+  bands:
+    - blue
+    - green
+    - red
+    - nir
+    - rededge1
+    - rededge2
+    - swir16
+    - swir22
+
+sentinel1:
+  collection: sentinel-1-grd
+  polarizations:
+    - vv
+    - vh
+
+copernicus_dem:
+  collection: cop-dem-glo-30
+
+worldcover:
+  stac_url: https://planetarycomputer.microsoft.com/api/stac/v1/
+  collection: esa-worldcover
+  year: 2021
+
+nbs:
+  catalog_url: https://microdata.nigerianstat.gov.ng/index.php/catalog/162/related-materials
+  commodities:
+    - rice local sold loose
+    - beans
+    - tomato
+    - yam
+    - maize
+
+split:
+  train_end: '2024-12-31'
+  validation_end: '2025-12-31'
+  test_start: '2026-01-01'
