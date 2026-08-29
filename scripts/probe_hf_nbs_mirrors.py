@@ -29,38 +29,60 @@ CPI_REPOS = [
     "electricsheepafrica/africa-nigeria-consumer-price-index-and-inflation-dc0e7a8c",
     "electricsheepafrica/africa-nigeria-consumer-price-index-and-inflation-f16262fc",
 ]
-COHD_REPOS = ["electricsheepafrica/africa-nigeria-cost-of-healthy-diet-ed6430e9"]
+
+
+def discover_repos(search: str) -> list[str]:
+    r = requests.get(
+        "https://huggingface.co/api/datasets",
+        params={"author": "electricsheepafrica", "search": search, "limit": 100, "full": "true"},
+        timeout=30,
+    )
+    r.raise_for_status()
+    return sorted({row["id"] for row in r.json() if row.get("id")})
+
+
+def load_df(repo: str) -> tuple[pd.DataFrame, str]:
+    r = requests.get(
+        "https://datasets-server.huggingface.co/parquet",
+        params={"dataset": repo},
+        timeout=30,
+    )
+    r.raise_for_status()
+    files = r.json().get("parquet_files", [])
+    if not files:
+        raise RuntimeError("no parquet files")
+    parts = []
+    for item in files:
+        p = requests.get(item["url"], timeout=60)
+        p.raise_for_status()
+        parts.append(pd.read_parquet(BytesIO(p.content)))
+    return pd.concat(parts, ignore_index=True), files[0]["url"]
 
 
 def load_repo(repo: str) -> dict:
-    api = "https://datasets-server.huggingface.co/parquet"
-    r = requests.get(api, params={"dataset": repo}, timeout=30)
-    r.raise_for_status()
-    payload = r.json()
-    files = payload.get("parquet_files", [])
-    if not files:
-        return {"repo": repo, "error": "no parquet files", "api": payload}
-    url = files[0]["url"]
-    p = requests.get(url, timeout=60)
-    p.raise_for_status()
-    df = pd.read_parquet(BytesIO(p.content))
-    detail = {
-        "repo": repo,
-        "rows": len(df),
-        "columns": list(df.columns),
-        "parquet_url": url,
-    }
+    df, url = load_df(repo)
+    detail = {"repo": repo, "rows": len(df), "columns": list(df.columns), "parquet_url": url}
     for col in ["source_dataset", "source_resource", "source_resource_id", "source_url", "source_sheet", "retrieved_at", "state", "dimension_state", "indicator_name"]:
         if col in df.columns:
-            vals = df[col].dropna().astype(str).unique().tolist()
-            detail[f"{col}_sample"] = vals[:40]
-    detail["head"] = df.head(8).where(pd.notna(df.head(8)), None).to_dict(orient="records")
+            detail[f"{col}_sample"] = df[col].dropna().astype(str).unique().tolist()[:80]
+    detail["head"] = df.head(4).where(pd.notna(df.head(4)), None).to_dict(orient="records")
+    if "state" in df.columns:
+        state_rows = df[df["state"].notna()].head(4)
+        detail["state_rows"] = [
+            {k: (None if pd.isna(v) else v) for k, v in row.items() if not pd.isna(v)}
+            for row in state_rows.to_dict(orient="records")
+        ]
     return detail
 
 
 def main(out_path: str) -> None:
-    report = {}
-    for repo in CPI_REPOS + COHD_REPOS:
+    discovered = {
+        "cpi": discover_repos("africa-nigeria-consumer-price-index-and-inflation"),
+        "cohd": discover_repos("africa-nigeria-cost-of-healthy-diet"),
+    }
+    repos = sorted(set(CPI_REPOS + discovered["cpi"] + discovered["cohd"]))
+    report = {"_discovered": discovered}
+    for repo in repos:
         try:
             report[repo] = load_repo(repo)
         except Exception as exc:
@@ -68,7 +90,7 @@ def main(out_path: str) -> None:
         print(json.dumps(report[repo], indent=2, default=str))
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     Path(out_path).write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
-    if not any("rows" in v for v in report.values()):
+    if not any(isinstance(v, dict) and "rows" in v for k, v in report.items() if not k.startswith("_")):
         raise SystemExit("No Hugging Face NBS mirrors were readable")
 
 
