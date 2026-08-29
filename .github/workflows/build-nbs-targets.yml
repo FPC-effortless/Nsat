@@ -3,11 +3,25 @@ name: Build nationwide NBS targets
 on:
   push:
     branches:
+      - main
       - data/nbs-national-upgrade-v2
     paths:
       - 'src/ngsatml/cpi.py'
       - 'src/ngsatml/cohd.py'
       - 'src/ngsatml/nbs.py'
+      - 'src/ngsatml/nbs_mirror.py'
+      - 'src/ngsatml/nbs_targets.py'
+      - 'src/ngsatml/cli.py'
+      - 'tests/test_nbs_targets.py'
+      - 'pyproject.toml'
+      - '.github/workflows/build-nbs-targets.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/ngsatml/cpi.py'
+      - 'src/ngsatml/cohd.py'
+      - 'src/ngsatml/nbs.py'
+      - 'src/ngsatml/nbs_mirror.py'
       - 'src/ngsatml/nbs_targets.py'
       - 'src/ngsatml/cli.py'
       - 'tests/test_nbs_targets.py'
@@ -37,13 +51,13 @@ jobs:
       - name: Install
         run: python -m pip install -e '.[dev]'
       - name: Unit regression tests
-        run: pytest -q tests/test_nbs_targets.py
+        run: pytest -q tests/test_nbs_targets.py tests/test_state_context.py
       - name: Build nationwide state targets
         run: |
           rm -rf data/nbs-targets
           python -m ngsatml.cli nbs-targets \
             --output data/nbs-targets \
-            --start-date 2023-10-01 \
+            --start-date 2024-10-01 \
             --strict
       - name: Verify artifact contract
         run: |
