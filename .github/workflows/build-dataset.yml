@@ -28,6 +28,7 @@ on:
         options:
           - smoke
           - pilot
+          - full
 
 permissions:
   contents: read
@@ -35,7 +36,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     env:
       PYTHONUNBUFFERED: '1'
       GDAL_DISABLE_READDIR_ON_OPEN: EMPTY_DIR
@@ -55,10 +56,17 @@ jobs:
           MODE="${{ inputs.mode }}"
           LIMIT="1"
           CONFIG="configs/dataset-smoke.yaml"
-          if [[ "${GITHUB_REF}" == refs/heads/run/pilot-* ]]; then
+          if [[ "${GITHUB_REF}" == refs/heads/run/full-* ]]; then
+            MODE="full"
+            LIMIT="360"
+            CONFIG="configs/dataset-full.yaml"
+          elif [[ "${GITHUB_REF}" == refs/heads/run/pilot-* ]]; then
             MODE="pilot"
             LIMIT="24"
             CONFIG="configs/dataset-pilot.yaml"
+          elif [[ "$MODE" == "full" ]]; then
+            LIMIT="360"
+            CONFIG="configs/dataset-full.yaml"
           elif [[ "$MODE" == "pilot" ]]; then
             LIMIT="120"
             CONFIG="configs/dataset-pilot.yaml"
@@ -74,21 +82,53 @@ jobs:
           --config '${{ steps.scope.outputs.config }}'
           --output data/dataset
           --max-market-months '${{ steps.scope.outputs.limit }}'
+      - name: Build quality and evaluation views
+        run: python -m ngsatml.quality --input-dir data/dataset/final
       - name: Validate artifact
         shell: bash
+        env:
+          BUILD_MODE: ${{ steps.scope.outputs.mode }}
         run: |
           python - <<'PY'
           import json
+          import os
           import pandas as pd
           from pathlib import Path
-          summary = json.loads(Path('data/dataset/final/dataset_summary.json').read_text())
-          usable = pd.read_parquet('data/dataset/final/nsat_market_satellite_usable.parquet')
+          final = Path('data/dataset/final')
+          summary = json.loads((final / 'dataset_summary.json').read_text())
+          quality = json.loads((final / 'quality_report.json').read_text())
+          usable = pd.read_parquet(final / 'nsat_market_satellite_usable.parquet')
+          core = pd.read_parquet(final / 'nsat_price_core_model_ready.parquet')
           assert summary['selected_market_months'] >= 1, summary
           assert summary['s2_market_months_ok'] >= 1, summary
           assert len(usable) >= 1, summary
           assert usable['target_price_ngn_1m'].notna().all()
           assert usable['s2_ndvi_median'].notna().all()
+          assert core['target_price_ngn_1m'].notna().all()
+          assert core['target_within_split'].all()
+          assert summary['core_duplicate_label_keys'] == 0, summary
+          assert quality['outlier_policy']['factor_threshold'] == 5.0
+          if os.environ['BUILD_MODE'] == 'full':
+              assert summary['raw_wfp_rows'] >= 50000, summary
+              assert summary['core_rows_model_ready'] >= 10000, summary
+              assert summary['core_states'] >= 10, summary
+              assert summary['core_markets'] >= 30, summary
+              assert summary['selected_market_months'] >= 300, summary
+              assert summary['core_power_row_coverage'] >= 0.80, summary
+              assert summary['s2_market_months_ok'] / summary['s2_market_months_total'] >= 0.85, summary
+              assert {'train', 'validation', 'test'} <= set(core['split'].unique()), summary
+              assert {'train', 'validation', 'test'} <= set(usable['split'].unique()), summary
+              assert usable['admin1'].nunique() >= 8, summary
+              assert quality['full_core']['quality_suspicious_rate'] < 0.01, quality
+              assert quality['national_regime']['rows'] >= 50000, quality
+              assert quality['national_regime']['evaluation_states'] >= 10, quality
+              assert quality['satellite_national_regime']['rows'] >= 2000, quality
+              assert quality['satellite_national_regime']['states'] >= 10, quality
+              assert quality['satellite_national_regime']['top_state_share'] <= 0.15, quality
+              weights = quality['national_regime']['state_training_weights'].values()
+              assert not weights or max(weights) <= 5.0, quality
           print(json.dumps(summary, indent=2))
+          print(json.dumps(quality, indent=2))
           print(usable.head(10).to_string(index=False))
           PY
       - name: Summarize
@@ -100,20 +140,26 @@ jobs:
           import json
           import os
           from pathlib import Path
-          s = json.loads(Path('data/dataset/final/dataset_summary.json').read_text())
+          final = Path('data/dataset/final')
+          s = json.loads((final / 'dataset_summary.json').read_text())
+          q = json.loads((final / 'quality_report.json').read_text())
           with open(Path(os.environ['GITHUB_STEP_SUMMARY']), 'a') as f:
-              f.write('## Nsat model-ready dataset\n')
+              f.write('## Nsat training-grade dataset\n')
               f.write(f"- Mode: {os.environ['BUILD_MODE']}\n")
-              f.write(f"- Selected market-months: {s['selected_market_months']}\n")
-              f.write(f"- Usable rows: {s['usable_rows']}\n")
+              f.write(f"- Price-core model-ready rows: {s['core_rows_model_ready']}\n")
+              f.write(f"- Core states / markets: {s['core_states']} / {s['core_markets']}\n")
+              f.write(f"- POWER coverage: {s['core_power_row_coverage']:.1%}\n")
+              f.write(f"- Selected Sentinel market-months: {s['selected_market_months']}\n")
               f.write(f"- Sentinel market-months OK: {s['s2_market_months_ok']}/{s['s2_market_months_total']}\n")
-              f.write(f"- Markets: {s['markets']}\n")
-              f.write(f"- States: {', '.join(s['states'])}\n")
+              f.write(f"- National regime rows: {q['national_regime']['rows']}\n")
+              f.write(f"- National evaluation states: {q['national_regime']['evaluation_states']}\n")
+              f.write(f"- Satellite national rows: {q['satellite_national_regime']['rows']}\n")
+              f.write(f"- Suspicious price-transition rate: {q['full_core']['quality_suspicious_rate']:.2%}\n")
           PY
       - name: Upload dataset artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nsat-${{ steps.scope.outputs.mode }}-market-satellite-dataset
+          name: nsat-${{ steps.scope.outputs.mode }}-training-dataset
           path: |
             data/dataset/final/
           if-no-files-found: error

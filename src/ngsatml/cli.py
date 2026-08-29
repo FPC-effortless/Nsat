@@ -13,12 +13,18 @@ from .sources import SOURCES
 from .stac import CatalogQuery, month_windows, search_items, write_manifest
 
 
+def _require_states(cfg: dict, command: str) -> None:
+    if not cfg.get("states"):
+        raise SystemExit(f"{command} requires at least one state in the top-level states list")
+
+
 def cmd_sources(_: argparse.Namespace) -> None:
     print(json.dumps(SOURCES, indent=2))
 
 
 def cmd_boundaries(args: argparse.Namespace) -> None:
     cfg = load_config(args.config)
+    _require_states(cfg, "boundaries")
     raw = download_adm1(Path(args.output) / "boundaries")
     target = Path(args.output) / "boundaries" / "pilot_states.geojson"
     filter_states_geojson(raw, cfg["states"], target)
@@ -27,6 +33,7 @@ def cmd_boundaries(args: argparse.Namespace) -> None:
 
 def cmd_catalog(args: argparse.Namespace) -> None:
     cfg = load_config(args.config)
+    _require_states(cfg, "catalog")
     boundary_path = Path(args.output) / "boundaries" / "pilot_states.geojson"
     if not boundary_path.exists():
         raise SystemExit("Run the boundaries command first")

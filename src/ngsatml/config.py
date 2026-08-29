@@ -15,6 +15,6 @@ def load_config(path: str | Path) -> dict[str, Any]:
     missing = sorted(required.difference(data))
     if missing:
         raise ValueError(f"Missing required config keys: {missing}")
-    if not data["states"]:
-        raise ValueError("At least one state is required")
+    if not isinstance(data["states"], list):
+        raise ValueError("states must be a list; use [] for nationwide dataset builds")
     return data
