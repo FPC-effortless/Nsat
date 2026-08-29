@@ -13,10 +13,12 @@ import requests
 # runners than the NADA/microdata download gateway. These URLs are discovered
 # from each NBS report page's "Download Tables" link.
 RESOURCES = {
-    "dec_2023": "https://nigerianstat.gov.ng/resource/selected_food_Dec_2023.xlsx",
-    "jan_2024": "https://nigerianstat.gov.ng/resource/SELECTED_FOOD_JANUARY_2024.xlsx",
-    "mar_2024": "https://nigerianstat.gov.ng/resource/selected_food_march_2024.xlsx",
-    "oct_2024": "https://nigerianstat.gov.ng/resource/selected_food_oct_2024.xlsx",
+    "food_dec_2023": "https://nigerianstat.gov.ng/resource/selected_food_Dec_2023.xlsx",
+    "food_jan_2024": "https://nigerianstat.gov.ng/resource/SELECTED_FOOD_JANUARY_2024.xlsx",
+    "food_mar_2024": "https://nigerianstat.gov.ng/resource/selected_food_march_2024.xlsx",
+    "food_oct_2024": "https://nigerianstat.gov.ng/resource/selected_food_oct_2024.xlsx",
+    "cpi_jul_2024": "https://nigerianstat.gov.ng/resource/cpi_1NewJuly_2024.xlsx",
+    "cpi_aug_2024": "https://nigerianstat.gov.ng/resource/cpi_1NewAug_2024.xlsx",
 }
 
 
@@ -38,10 +40,10 @@ def inspect_book(name: str, payload: bytes) -> dict:
     for ws in wb.worksheets:
         rows = []
         for idx, row in enumerate(ws.iter_rows(values_only=True), start=1):
-            vals = [None if v is None else str(v) for v in row[:24]]
+            vals = [None if v is None else str(v) for v in row[:28]]
             if any(v not in (None, "") for v in vals):
                 rows.append({"row": idx, "values": vals})
-            if len(rows) >= 24:
+            if len(rows) >= 30:
                 break
         result["sheets"].append({
             "title": ws.title,
