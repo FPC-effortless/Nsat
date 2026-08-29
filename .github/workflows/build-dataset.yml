@@ -1,0 +1,117 @@
+name: Build model-ready dataset
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'configs/dataset-*.yaml'
+      - 'pyproject.toml'
+      - '.github/workflows/build-dataset.yml'
+  push:
+    branches:
+      - main
+      - 'run/**'
+    paths:
+      - 'src/**'
+      - 'configs/dataset-*.yaml'
+      - 'pyproject.toml'
+      - '.github/workflows/build-dataset.yml'
+      - '.github/dataset-trigger.txt'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Build size
+        required: true
+        default: smoke
+        type: choice
+        options:
+          - smoke
+          - pilot
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      PYTHONUNBUFFERED: '1'
+      GDAL_DISABLE_READDIR_ON_OPEN: EMPTY_DIR
+      CPL_VSIL_CURL_ALLOWED_EXTENSIONS: .tif,.TIF
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: python -m pip install -e '.[dev]'
+      - name: Select build scope
+        id: scope
+        shell: bash
+        run: |
+          MODE="${{ inputs.mode }}"
+          LIMIT="1"
+          CONFIG="configs/dataset-smoke.yaml"
+          if [[ "${GITHUB_REF}" == refs/heads/run/pilot-* ]]; then
+            MODE="pilot"
+            LIMIT="24"
+            CONFIG="configs/dataset-pilot.yaml"
+          elif [[ "$MODE" == "pilot" ]]; then
+            LIMIT="120"
+            CONFIG="configs/dataset-pilot.yaml"
+          else
+            MODE="smoke"
+          fi
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "limit=$LIMIT" >> "$GITHUB_OUTPUT"
+          echo "config=$CONFIG" >> "$GITHUB_OUTPUT"
+      - name: Build dataset
+        run: >-
+          python -m ngsatml.cli dataset
+          --config '${{ steps.scope.outputs.config }}'
+          --output data/dataset
+          --max-market-months '${{ steps.scope.outputs.limit }}'
+      - name: Validate artifact
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import pandas as pd
+          from pathlib import Path
+          summary = json.loads(Path('data/dataset/final/dataset_summary.json').read_text())
+          usable = pd.read_parquet('data/dataset/final/nsat_market_satellite_usable.parquet')
+          assert summary['selected_market_months'] >= 1, summary
+          assert summary['s2_market_months_ok'] >= 1, summary
+          assert len(usable) >= 1, summary
+          assert usable['target_price_ngn_1m'].notna().all()
+          assert usable['s2_ndvi_median'].notna().all()
+          print(json.dumps(summary, indent=2))
+          print(usable.head(10).to_string(index=False))
+          PY
+      - name: Summarize
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          s = json.loads(Path('data/dataset/final/dataset_summary.json').read_text())
+          with open(Path(__import__('os').environ['GITHUB_STEP_SUMMARY']), 'a') as f:
+              f.write('## Nsat model-ready dataset\n')
+              f.write(f"- Mode: ${{{{ steps.scope.outputs.mode }}}}\n")
+              f.write(f"- Selected market-months: {s['selected_market_months']}\n")
+              f.write(f"- Usable rows: {s['usable_rows']}\n")
+              f.write(f"- Sentinel market-months OK: {s['s2_market_months_ok']}/{s['s2_market_months_total']}\n")
+              f.write(f"- Markets: {s['markets']}\n")
+              f.write(f"- States: {', '.join(s['states'])}\n")
+          PY
+      - name: Upload dataset artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nsat-${{ steps.scope.outputs.mode }}-market-satellite-dataset
+          path: |
+            data/dataset/final/
+          if-no-files-found: error
+          retention-days: 30
