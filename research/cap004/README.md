@@ -1,0 +1,9 @@
+# CAP004: source identity and retrospective forecasting controls
+
+Nsat remains data infrastructure, not a competing neural architecture. `forecast_audit.py` checks source-artifact hashes without claiming that a matching hash proves publisher authenticity. It fits a ridge baseline with train-only imputation/scaling, explicit input-only feature lists, future-target feature guards, strict horizon ordering and unfiltered evaluation targets. Log-change targets use zero change as their persistence baseline; price targets use current price. Test-target perturbation must leave coefficients and predictions unchanged.
+
+The saved training-grade v1.1 archive supplies 39,343 training rows, 9,240 validation rows and 6,752 test rows. The checked grain is market_id x month x commodity x canonical unit x price type. The merged training/evaluation sample has no duplicated keys or missing targets. It covers 14 states overall, 13 in evaluation, includes some non-food commodities, and is not a 37-state representative survey.
+
+Both newly fitted ridge variants trail zero change on 2022 test log-change MAE. See NSAT_FORECAST.json for overall and state-level scores. This negative result now measures forecasting quality on saved data; no tuned model or superiority claim is made. Row-level publication vintages and independently authenticated raw-publisher receipts are unavailable, so this is a retrospective benchmark, not a deployable real-time backtest.
+
+One new focused fixture and ten available native tests passed. Four other native modules were blocked at collection by missing declared dependencies (requests/pyproj, with other geospatial packages not installed). The older CAP003 full-suite result is historical, not a fresh full pass. Run `python -m pytest research/cap004/test_regressions.py -q` plus the declared native suite when dependencies are installed.

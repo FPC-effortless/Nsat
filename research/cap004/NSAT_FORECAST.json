@@ -1,0 +1,553 @@
+{
+  "quality": {
+    "source": "saved nsat-training-grade-final-v1.1.zip",
+    "rows": 55335,
+    "training_rows": 39343,
+    "evaluation_rows": 15992,
+    "key": [
+      "market_id",
+      "month",
+      "commodity",
+      "unit",
+      "pricetype"
+    ],
+    "duplicate_keys": 0,
+    "null_target_rows": 0,
+    "date_min": "2015-01-01",
+    "date_max": "2022-11-01",
+    "states": 14,
+    "evaluation_states": 13,
+    "categories": {
+      "cereals and tubers": 26314,
+      "pulses and nuts": 9622,
+      "vegetables and fruits": 6060,
+      "meat, fish and eggs": 4397,
+      "oil and fats": 3406,
+      "non-food": 2563,
+      "miscellaneous food": 1861,
+      "milk and dairy": 1112
+    },
+    "split_counts": {
+      "train": 39343,
+      "validation": 9240,
+      "test": 6752
+    },
+    "future_target_flags_excluded_as_features": true,
+    "authenticity": "Artifact is recoverable; no independently verified raw-publisher row receipts in this package",
+    "vintages": "No row-level publication times; retrospective forecasting only",
+    "csv_sha256": {
+      "nsat_price_core_national_train_clean.csv": "a904ffe3c12157995ba3a8b15319ac2ea1120e7d07e67a80591dd995945e50af",
+      "nsat_price_core_national_eval.csv": "186e7381c13104aff53343cbd294aa125b7b2180e51d9b706a19ee881acd8bb7"
+    }
+  },
+  "fits": [
+    {
+      "features": [
+        "price_ngn",
+        "price_lag_1m",
+        "price_lag_2m",
+        "price_lag_3m",
+        "price_lag_6m",
+        "price_lag_12m",
+        "price_momentum_1m_pct",
+        "price_momentum_3m_pct",
+        "price_momentum_12m_pct",
+        "month_sin",
+        "month_cos"
+      ],
+      "fit_rows": 39343,
+      "coefficients": [
+        0.007322627974426557,
+        -0.04427338764594223,
+        0.020831172796314242,
+        0.010767382749451304,
+        0.002291617547822801,
+        0.002724459171381757,
+        0.0015479181562916967,
+        -0.04611915809076466,
+        -0.010251326954259884,
+        -0.010743164618246644,
+        0.013588163760421624,
+        -0.0027300089863887497
+      ],
+      "feature_mean": [
+        356.0560568487942,
+        358.4233577084923,
+        363.18918647111116,
+        362.87545547823447,
+        360.91159903940394,
+        361.14286613353727,
+        0.03285683348274982,
+        0.07360257475794295,
+        0.16436480187776972,
+        -0.0353541150018123,
+        -0.02783984373128862
+      ],
+      "scores": [
+        {
+          "split": "validation",
+          "n": 9240,
+          "mae_log_change": 0.10221527578241736,
+          "zero_change_mae": 0.09475877706066806,
+          "direction_accuracy": 0.4245670995670996,
+          "zero_change_direction_accuracy": 0.18474025974025973
+        },
+        {
+          "split": "test",
+          "n": 6752,
+          "mae_log_change": 0.09380852726128286,
+          "zero_change_mae": 0.08420523657726509,
+          "direction_accuracy": 0.4277251184834123,
+          "zero_change_direction_accuracy": 0.19757109004739337
+        },
+        {
+          "split": "validation",
+          "state": "Abia",
+          "n": 270,
+          "mae_log_change": 0.05717506660915354,
+          "zero_change_mae": 0.05595415984186885
+        },
+        {
+          "split": "validation",
+          "state": "Adamawa",
+          "n": 330,
+          "mae_log_change": 0.0827151461104564,
+          "zero_change_mae": 0.07171233884456797
+        },
+        {
+          "split": "validation",
+          "state": "Borno",
+          "n": 2472,
+          "mae_log_change": 0.07825304584339711,
+          "zero_change_mae": 0.07034518564033633
+        },
+        {
+          "split": "validation",
+          "state": "Gombe",
+          "n": 330,
+          "mae_log_change": 0.06444021787314563,
+          "zero_change_mae": 0.056707626450107865
+        },
+        {
+          "split": "validation",
+          "state": "Jigawa",
+          "n": 286,
+          "mae_log_change": 0.09897802881090427,
+          "zero_change_mae": 0.09056188571085698
+        },
+        {
+          "split": "validation",
+          "state": "Kaduna",
+          "n": 595,
+          "mae_log_change": 0.09188077280803557,
+          "zero_change_mae": 0.08629585948401361
+        },
+        {
+          "split": "validation",
+          "state": "Kano",
+          "n": 320,
+          "mae_log_change": 0.07996353683453532,
+          "zero_change_mae": 0.07485011347541375
+        },
+        {
+          "split": "validation",
+          "state": "Katsina",
+          "n": 298,
+          "mae_log_change": 0.07040809415135428,
+          "zero_change_mae": 0.06269277559608637
+        },
+        {
+          "split": "validation",
+          "state": "Kebbi",
+          "n": 330,
+          "mae_log_change": 0.08013836921572819,
+          "zero_change_mae": 0.07555567447104079
+        },
+        {
+          "split": "validation",
+          "state": "Lagos",
+          "n": 319,
+          "mae_log_change": 0.06284995328028117,
+          "zero_change_mae": 0.05819666675674897
+        },
+        {
+          "split": "validation",
+          "state": "Oyo",
+          "n": 324,
+          "mae_log_change": 0.09349385953435056,
+          "zero_change_mae": 0.0848452819803295
+        },
+        {
+          "split": "validation",
+          "state": "Yobe",
+          "n": 3036,
+          "mae_log_change": 0.14916446028259672,
+          "zero_change_mae": 0.1409955249952534
+        },
+        {
+          "split": "validation",
+          "state": "Zamfara",
+          "n": 330,
+          "mae_log_change": 0.08434015774560844,
+          "zero_change_mae": 0.076545381118158
+        },
+        {
+          "split": "test",
+          "state": "Abia",
+          "n": 330,
+          "mae_log_change": 0.04505846415925266,
+          "zero_change_mae": 0.03524814249366146
+        },
+        {
+          "split": "test",
+          "state": "Adamawa",
+          "n": 330,
+          "mae_log_change": 0.04597159155432122,
+          "zero_change_mae": 0.03850744671398501
+        },
+        {
+          "split": "test",
+          "state": "Borno",
+          "n": 1238,
+          "mae_log_change": 0.17988175799289374,
+          "zero_change_mae": 0.16106293092788448
+        },
+        {
+          "split": "test",
+          "state": "Gombe",
+          "n": 330,
+          "mae_log_change": 0.04380028954159379,
+          "zero_change_mae": 0.03628461151050868
+        },
+        {
+          "split": "test",
+          "state": "Jigawa",
+          "n": 286,
+          "mae_log_change": 0.058980873347534456,
+          "zero_change_mae": 0.053025180059559654
+        },
+        {
+          "split": "test",
+          "state": "Kaduna",
+          "n": 596,
+          "mae_log_change": 0.07360842448281496,
+          "zero_change_mae": 0.06793302201494655
+        },
+        {
+          "split": "test",
+          "state": "Kano",
+          "n": 319,
+          "mae_log_change": 0.05088870277317954,
+          "zero_change_mae": 0.04160354866379477
+        },
+        {
+          "split": "test",
+          "state": "Katsina",
+          "n": 296,
+          "mae_log_change": 0.057846892802896316,
+          "zero_change_mae": 0.05331935110861898
+        },
+        {
+          "split": "test",
+          "state": "Kebbi",
+          "n": 330,
+          "mae_log_change": 0.05600711912953838,
+          "zero_change_mae": 0.045269672312272156
+        },
+        {
+          "split": "test",
+          "state": "Lagos",
+          "n": 319,
+          "mae_log_change": 0.03823936752369936,
+          "zero_change_mae": 0.027407975587230436
+        },
+        {
+          "split": "test",
+          "state": "Oyo",
+          "n": 330,
+          "mae_log_change": 0.06518516413427197,
+          "zero_change_mae": 0.05306538143320887
+        },
+        {
+          "split": "test",
+          "state": "Yobe",
+          "n": 1718,
+          "mae_log_change": 0.11654426708999424,
+          "zero_change_mae": 0.1102745390207783
+        },
+        {
+          "split": "test",
+          "state": "Zamfara",
+          "n": 330,
+          "mae_log_change": 0.05968895738664333,
+          "zero_change_mae": 0.05300566693365238
+        }
+      ],
+      "source_authenticity": "UNVERIFIED_BY_THIS_FUNCTION",
+      "target": "target_log_change_1m",
+      "metric_units": "target units",
+      "availability_vintage_verified": false,
+      "arm": "price_history"
+    },
+    {
+      "features": [
+        "price_ngn",
+        "price_lag_1m",
+        "price_lag_2m",
+        "price_lag_3m",
+        "price_lag_6m",
+        "price_lag_12m",
+        "price_momentum_1m_pct",
+        "price_momentum_3m_pct",
+        "price_momentum_12m_pct",
+        "month_sin",
+        "month_cos",
+        "power_t2m",
+        "power_rh2m",
+        "power_ws10m",
+        "power_prectotcorr"
+      ],
+      "fit_rows": 39343,
+      "coefficients": [
+        0.007322627974423854,
+        -0.043290084825695435,
+        0.020331706579894963,
+        0.010563459104890295,
+        0.0023989582048095787,
+        0.0028170564851338056,
+        0.001634750529020301,
+        -0.046656717020766396,
+        -0.010347471480132061,
+        -0.011227482924272256,
+        0.016210022852013083,
+        -0.002585818185491733,
+        -0.0063542936182943,
+        0.007468208943531219,
+        0.012105294716712383,
+        0.006313171681398105
+      ],
+      "feature_mean": [
+        356.0560568487942,
+        358.4233577084923,
+        363.18918647111116,
+        362.87545547823447,
+        360.91159903940394,
+        361.14286613353727,
+        0.03285683348274982,
+        0.07360257475794295,
+        0.16436480187776972,
+        -0.0353541150018123,
+        -0.02783984373128862,
+        27.07594082810232,
+        48.737409704398665,
+        3.4837813588183772,
+        2.3740380753883676
+      ],
+      "scores": [
+        {
+          "split": "validation",
+          "n": 9240,
+          "mae_log_change": 0.10463684673299378,
+          "zero_change_mae": 0.09475877706066806,
+          "direction_accuracy": 0.4185064935064935,
+          "zero_change_direction_accuracy": 0.18474025974025973
+        },
+        {
+          "split": "test",
+          "n": 6752,
+          "mae_log_change": 0.09663433350534376,
+          "zero_change_mae": 0.08420523657726509,
+          "direction_accuracy": 0.4290580568720379,
+          "zero_change_direction_accuracy": 0.19757109004739337
+        },
+        {
+          "split": "validation",
+          "state": "Abia",
+          "n": 270,
+          "mae_log_change": 0.05804408390559639,
+          "zero_change_mae": 0.05595415984186885
+        },
+        {
+          "split": "validation",
+          "state": "Adamawa",
+          "n": 330,
+          "mae_log_change": 0.08466676465217143,
+          "zero_change_mae": 0.07171233884456797
+        },
+        {
+          "split": "validation",
+          "state": "Borno",
+          "n": 2472,
+          "mae_log_change": 0.07990301788136166,
+          "zero_change_mae": 0.07034518564033633
+        },
+        {
+          "split": "validation",
+          "state": "Gombe",
+          "n": 330,
+          "mae_log_change": 0.06379469305298575,
+          "zero_change_mae": 0.056707626450107865
+        },
+        {
+          "split": "validation",
+          "state": "Jigawa",
+          "n": 286,
+          "mae_log_change": 0.10208410210939321,
+          "zero_change_mae": 0.09056188571085698
+        },
+        {
+          "split": "validation",
+          "state": "Kaduna",
+          "n": 595,
+          "mae_log_change": 0.09978799735790742,
+          "zero_change_mae": 0.08629585948401361
+        },
+        {
+          "split": "validation",
+          "state": "Kano",
+          "n": 320,
+          "mae_log_change": 0.08887969997350502,
+          "zero_change_mae": 0.07485011347541375
+        },
+        {
+          "split": "validation",
+          "state": "Katsina",
+          "n": 298,
+          "mae_log_change": 0.07617354251184229,
+          "zero_change_mae": 0.06269277559608637
+        },
+        {
+          "split": "validation",
+          "state": "Kebbi",
+          "n": 330,
+          "mae_log_change": 0.0845775625841258,
+          "zero_change_mae": 0.07555567447104079
+        },
+        {
+          "split": "validation",
+          "state": "Lagos",
+          "n": 319,
+          "mae_log_change": 0.0633532152643523,
+          "zero_change_mae": 0.05819666675674897
+        },
+        {
+          "split": "validation",
+          "state": "Oyo",
+          "n": 324,
+          "mae_log_change": 0.09739040356710309,
+          "zero_change_mae": 0.0848452819803295
+        },
+        {
+          "split": "validation",
+          "state": "Yobe",
+          "n": 3036,
+          "mae_log_change": 0.15038058654420922,
+          "zero_change_mae": 0.1409955249952534
+        },
+        {
+          "split": "validation",
+          "state": "Zamfara",
+          "n": 330,
+          "mae_log_change": 0.08702625998660955,
+          "zero_change_mae": 0.076545381118158
+        },
+        {
+          "split": "test",
+          "state": "Abia",
+          "n": 330,
+          "mae_log_change": 0.04690023917247742,
+          "zero_change_mae": 0.03524814249366146
+        },
+        {
+          "split": "test",
+          "state": "Adamawa",
+          "n": 330,
+          "mae_log_change": 0.048960362355984895,
+          "zero_change_mae": 0.03850744671398501
+        },
+        {
+          "split": "test",
+          "state": "Borno",
+          "n": 1238,
+          "mae_log_change": 0.1819930698212795,
+          "zero_change_mae": 0.16106293092788448
+        },
+        {
+          "split": "test",
+          "state": "Gombe",
+          "n": 330,
+          "mae_log_change": 0.052350246267430435,
+          "zero_change_mae": 0.03628461151050868
+        },
+        {
+          "split": "test",
+          "state": "Jigawa",
+          "n": 286,
+          "mae_log_change": 0.05826412760955753,
+          "zero_change_mae": 0.053025180059559654
+        },
+        {
+          "split": "test",
+          "state": "Kaduna",
+          "n": 596,
+          "mae_log_change": 0.08260748055898577,
+          "zero_change_mae": 0.06793302201494655
+        },
+        {
+          "split": "test",
+          "state": "Kano",
+          "n": 319,
+          "mae_log_change": 0.051676576001188,
+          "zero_change_mae": 0.04160354866379477
+        },
+        {
+          "split": "test",
+          "state": "Katsina",
+          "n": 296,
+          "mae_log_change": 0.06285250743946355,
+          "zero_change_mae": 0.05331935110861898
+        },
+        {
+          "split": "test",
+          "state": "Kebbi",
+          "n": 330,
+          "mae_log_change": 0.054768389959025096,
+          "zero_change_mae": 0.045269672312272156
+        },
+        {
+          "split": "test",
+          "state": "Lagos",
+          "n": 319,
+          "mae_log_change": 0.044496734156168165,
+          "zero_change_mae": 0.027407975587230436
+        },
+        {
+          "split": "test",
+          "state": "Oyo",
+          "n": 330,
+          "mae_log_change": 0.06874603850006743,
+          "zero_change_mae": 0.05306538143320887
+        },
+        {
+          "split": "test",
+          "state": "Yobe",
+          "n": 1718,
+          "mae_log_change": 0.11742725610789542,
+          "zero_change_mae": 0.1102745390207783
+        },
+        {
+          "split": "test",
+          "state": "Zamfara",
+          "n": 330,
+          "mae_log_change": 0.06235456115169907,
+          "zero_change_mae": 0.05300566693365238
+        }
+      ],
+      "source_authenticity": "UNVERIFIED_BY_THIS_FUNCTION",
+      "target": "target_log_change_1m",
+      "metric_units": "target units",
+      "availability_vintage_verified": false,
+      "arm": "price_and_climate"
+    }
+  ]
+}
