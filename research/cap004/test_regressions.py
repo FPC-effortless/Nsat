@@ -1,8 +1,7 @@
 from pathlib import Path
-import sys,copy,types,torch,numpy as np,pytest
+import sys,copy,types,numpy as np,pytest
 REPO=Path(__file__).resolve().parents[2]
 sys.path[:0]=[str(REPO),str(REPO/'src'),str(REPO/'dpsl_python')]
-torch.set_num_threads(1)
 
 
 def test_nsat_source_identity_and_forecast_target_isolation(tmp_path):
